@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ИНСО — оригами, 30 этажей</title>
+<style>
+  body { margin: 0; background: #dcdfe3; font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
+  #ui { position: fixed; top: 12px; left: 12px; background: rgba(255,255,255,.93); padding: 10px 12px; border-radius: 8px; max-width: 330px; }
+  #ui h1 { font-size: 15px; margin: 0 0 8px; }
+  #ui h2 { font-size: 13px; margin: 10px 0 4px; color: #3e4c59; }
+  #ui button { margin: 0 4px 6px 0; padding: 4px 8px; border: 1px solid #9aa3ad; background: #fff; border-radius: 4px; cursor: pointer; }
+  #ui button.on { background: #2b3a4a; color: #fff; border-color: #2b3a4a; }
+  #ui label { display: block; margin-top: 4px; }
+  #ui input[type=range] { width: 100%; }
+  #sunInfo, #dims { color: #555; font-size: 12px; margin-top: 6px; }
+  body.clean #ui { display: none; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="ui">
+  <h1>ИНСО — «оригами»: южный фасад сложен гранями</h1>
+  <h2>Форма и фасад</h2>
+  <input type="checkbox" id="optTaper" hidden>
+  <label><input type="checkbox" id="optLantern" checked> Фонарь (стеклянный верх)</label>
+  <input type="checkbox" id="optSaw" hidden><span id="sawLabel" hidden></span><input type="range" id="sawSlider" hidden>
+  <label>Глубина складок: <span id="foldLabel"></span>
+    <input type="range" id="foldSlider" min="0.4" max="2.5" step="0.1" value="2.5"></label>
+  <input type="checkbox" id="optCrown" hidden>
+  <label>Крыша:
+    <select id="roofSel">
+      <option value="lid">А. Парящая плита</option>
+      <option value="wedge">Б. Наклонный срез</option>
+      <option value="teeth">В. Зубчатая корона</option>
+      <option value="spire">Г. Кристалл-остриё</option>
+      <option value="flat">Плоская (для сравнения)</option>
+    </select></label>
+  <label><input type="checkbox" id="optCeramic" checked> Глазурованная светлая керамика</label>
+  <label>Окна: <span id="winLabel"></span>
+    <input type="range" id="winSlider" min="2.4" max="3.0" step="0.1" value="3.0"></label>
+  <h2>Время суток</h2>
+  <label><input type="checkbox" id="eveningToggle"> Вечер: подсветка и горящие окна</label>
+  <label><input type="checkbox" id="sunToggle"> Солнце 15 ноября (условно 55° с. ш.)</label>
+  <label>Время: <span id="tLabel">12:00</span>
+    <input type="range" id="tSlider" min="8.25" max="15.75" step="0.25" value="12"></label>
+  <h2>Виды</h2>
+  <div>
+    <button data-view="park">Из парка</button>
+    <button data-view="far">Издалека</button>
+    <button data-view="aerial">Сверху-спереди</button>
+    <button data-view="corner">Срезанный угол</button>
+    <button data-view="close">Фасад вблизи</button>
+    <button data-view="crown">Фонарь</button>
+    <button data-view="base">Подиум</button>
+  </div>
+  <div id="sunInfo"></div>
+  <div id="dims"></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---- Параметры (метры) ----
+const ROT = 20, LEN = 40, DEPTH = 16, CUT = 4.0;
+const MODULE = 3.4;                 // шаг окон; окно = MODULE − простенок
+const FLOORS = 30, FLOOR_H = 3.3, SLAB = 0.45;
+const PODIUM_H = 9, LANTERN = 2, TAPER = 2.2; // на столько метров каждый торец смещается внутрь к верху
+const LAT = 55, DECL = -18.6;
+const rad = Math.PI / 180;
+
+const params = new URLSearchParams(location.search);
+if (params.get('clean')) document.body.classList.add('clean');
+const opt = {
+  taper: false, // сужение кверху отвергнуто 19.10.2026
+  lantern: params.get('lantern') !== '0',
+  flutes: false,
+  saw: false,
+  fold: +(params.get('fold') || 2.5),
+  sawDepth: +(params.get('sawDepth') || 0.35),
+  crown: true,
+  roof: params.get('roof') || 'flat',
+  ceramic: params.get('ceramic') !== '0',
+  win: +(params.get('win') || 3.0),
+  evening: params.get('evening') === '1',
+};
+for (const [id, k] of [['optTaper', 'taper'], ['optLantern', 'lantern'], ['optSaw', 'saw'], ['optCrown', 'crown'], ['optCeramic', 'ceramic'], ['eveningToggle', 'evening']]) document.getElementById(id).checked = opt[k];
+document.getElementById('sawSlider').value = opt.sawDepth;
+document.getElementById('winSlider').value = opt.win;
+
+// ---- План: параллелограмм, торцы по линии север–юг, острые углы срезаны ----
+const dirS = new THREE.Vector2(Math.cos(ROT * rad), -Math.sin(ROT * rad));
+const nS = new THREE.Vector2(Math.sin(ROT * rad), Math.cos(ROT * rad));
+const DZ = DEPTH / Math.cos(ROT * rad), Z0 = 9;
+const A = new THREE.Vector2(-LEN / 2 * dirS.x, -LEN / 2 * dirS.y + Z0);
+const B = new THREE.Vector2(LEN / 2 * dirS.x, LEN / 2 * dirS.y + Z0);
+const A2 = new THREE.Vector2(A.x, A.y - DZ), B2 = new THREE.Vector2(B.x, B.y - DZ);
+const nCut = new THREE.Vector2(-Math.sin(30 * rad), Math.cos(30 * rad));
+const dCut = CUT * (Math.sin(ROT * rad) + Math.cos(ROT * rad) * Math.tan(30 * rad));
+const P1 = A.clone().add(dirS.clone().multiplyScalar(CUT)), P2 = new THREE.Vector2(A.x, A.y - dCut);
+const Q1 = new THREE.Vector2(B2.x, B2.y + dCut), Q2 = B2.clone().add(dirS.clone().multiplyScalar(-CUT));
+const basePlan = [P1, B, Q1, Q2, A2, P2];
+const side = [-1, 1, 1, 1, -1, -1]; // −1 — западная сторона, +1 — восточная: при сужении сдвигаются навстречу друг другу
+const planAt = t => basePlan.map((p, i) => p.clone().add(dirS.clone().multiplyScalar(-side[i] * TAPER * t * (opt.taper ? 1 : 0))));
+const WALLS = [ // индексы точек плана, нормаль, тип
+  [5, 0, nCut, 'cut'], [0, 1, nS, 'south'], [1, 2, new THREE.Vector2(1, 0), 'eastEnd'],
+  [2, 3, new THREE.Vector2(-nCut.x, -nCut.y), 'service'], [3, 4, nS.clone().negate(), 'north'], [4, 5, new THREE.Vector2(-1, 0), 'westEnd'],
+];
+
+// ---- Рендер ----
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(36, innerWidth / innerHeight, 0.5, 3000);
+const controls = new OrbitControls(camera, renderer.domElement);
+const hemi = new THREE.HemisphereLight(0xffffff, 0xb8bcc0, 1.1); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096);
+Object.assign(sun.shadow.camera, { left: -320, right: 320, top: 320, bottom: -320, near: 1, far: 1400 });
+sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.05;
+scene.add(sun, sun.target);
+
+// ---- Текстуры фасада: цвет, рельеф, свечение ----
+const PX = 32, FLUTE = 0.18;
+let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+function facadeMaps(len, floors, kind) {
+  const W = Math.max(8, Math.round(len * PX)), H = Math.round((floors * FLOOR_H + (kind.parapet || 0)) * PX);
+  const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return [c, c.getContext('2d')]; };
+  const [col, g] = mk(), [nrm, n] = mk(), [emi, e] = mk();
+  g.fillStyle = kind.ceramic ? '#efe9de' : '#ddd8cf'; g.fillRect(0, 0, W, H);
+  n.fillStyle = 'rgb(128,128,255)'; n.fillRect(0, 0, W, H);
+  e.fillStyle = '#000'; e.fillRect(0, 0, W, H);
+  if (kind.flutes) {
+    const fw = FLUTE * PX;
+    for (let x = 0; x < W; x++) {
+      const ph = ((x % fw) / fw) * Math.PI * 2, nx = Math.sin(ph) * 0.85, nz = Math.sqrt(1 - nx * nx);
+      n.fillStyle = `rgb(${Math.round(128 + 127 * nx)},128,${Math.round(128 + 127 * nz)})`; n.fillRect(x, 0, 1, H);
+      g.fillStyle = `rgba(0,0,0,${0.04 + 0.04 * Math.cos(ph)})`; g.fillRect(x, 0, 1, H);
+    }
+  }
+  const y = m => H - m * PX;
+  const win = (x0, w, top, bot, lit) => {
+    g.fillStyle = lit ? (kind.allGlass ? '#f4dcb0' : '#f2cf96') : (kind.evening ? '#26303d' : '#8e98a1'); g.fillRect(x0 * PX, top, w * PX, bot - top);
+    e.fillStyle = lit ? (kind.allGlass ? '#9c7442' : '#8a6233') : '#000'; e.fillRect(x0 * PX, top, w * PX, bot - top);
+    g.strokeStyle = '#2f3338'; g.lineWidth = 2; g.strokeRect(x0 * PX, top, w * PX, bot - top);
+    g.lineWidth = 1; g.beginPath(); g.moveTo((x0 + w * 0.72) * PX, top); g.lineTo((x0 + w * 0.72) * PX, bot); g.stroke();
+    n.fillStyle = 'rgb(128,128,255)'; n.fillRect(x0 * PX, top, w * PX, bot - top);
+    if (false) { // (v2) линия света над окном — убрана: её видно изнутри
+      g.fillStyle = '#f6d6a3'; g.fillRect(x0 * PX, top - 0.06 * PX, w * PX, 0.06 * PX);
+      e.fillStyle = '#a8773f'; e.fillRect(x0 * PX, top - 0.06 * PX, w * PX, 0.06 * PX);
+    }
+  };
+  if (kind.evening && kind.noseLight) for (let f = 1; f < floors; f += 2) { // тонкая линия на лицевой кромке перекрытия: светит наружу, из квартир не видна
+    const yy = y(f * FLOOR_H + 0.2);
+    g.fillStyle = '#f6dcae'; g.fillRect(0, yy - 0.025 * PX, W, 0.05 * PX);
+    e.fillStyle = '#9a6e3a'; e.fillRect(0, yy - 0.025 * PX, W, 0.05 * PX);
+  }
+  if (false) for (let f = 0; f < floors; f++) {
+    const y0 = y(f * FLOOR_H + SLAB), y1 = y((f + 1) * FLOOR_H);
+    const gr = e.createLinearGradient(0, y0, 0, y1); gr.addColorStop(0, 'rgba(120,82,40,0.55)'); gr.addColorStop(0.55, 'rgba(70,48,24,0.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    e.fillStyle = gr; e.fillRect(0, y1, W, y0 - y1);
+  }
+  for (let f = 0; f < floors; f++) {
+    const top = y((f + 1) * FLOOR_H - 0.05), bot = y(f * FLOOR_H + SLAB);
+    if (kind.allGlass) { for (let x = 0; x < len - 0.3; x += 1.5) win(x + 0.06, Math.min(1.44, len - x - 0.12), top, bot, kind.evening); continue; }
+    for (const [x0, w] of kind.windows(f)) win(x0, w, top, bot, kind.evening && rnd() < 0.3);
+  }
+  const tex = c => { const t = new THREE.CanvasTexture(c); t.anisotropy = 8; return t; };
+  const map = tex(col); map.colorSpace = THREE.SRGBColorSpace;
+  const emissiveMap = tex(emi); emissiveMap.colorSpace = THREE.SRGBColorSpace;
+  // шероховатость: стекло гладкое, простенки — глазурь (умеренный блеск) или бетон (матовый)
+  const [rgh, r] = mk(); r.fillStyle = kind.ceramic ? 'rgb(90,90,90)' : 'rgb(215,215,215)'; r.fillRect(0, 0, W, H);
+  r.fillStyle = 'rgb(25,25,25)';
+  for (let f = 0; f < floors; f++) { const top = y((f + 1) * FLOOR_H - 0.05), bot = y(f * FLOOR_H + SLAB); if (kind.windows) for (const [x0, w] of kind.windows(f)) r.fillRect(x0 * PX, top, w * PX, bot - top); }
+  return { map, normalMap: kind.flutes ? tex(nrm) : null, emissiveMap, roughnessMap: tex(rgh) };
+}
+function moduleWindows(len, win) {
+  const n = Math.floor((len - 0.6) / MODULE), margin = (len - n * MODULE) / 2;
+  return () => Array.from({ length: n }, (_, k) => [margin + k * MODULE + (MODULE - win) / 2, win]);
+}
+const endWindows = (len, fromSouth, win) => () => { const at = m => fromSouth ? m : len - m; return [[at(3.2) - win / 2, win], [at(len - 2.5) - 0.6, 1.2]]; };
+const northWindows = len => () => [[1.6, 1.2], [len / 2 - 0.6, 1.2], [len - 2.8, 1.2]];
+
+// ---- Геометрия ----
+function quad(b1, b2, t1, t2, y0, y1, out, material, rows = 24, vr = [0, 1]) { // стена: низ b1–b2, верх t1–t2, разбита на полосы
+  const geo = new THREE.BufferGeometry(), pos = [], uv = [], nr = [], idx = [];
+  const u = new THREE.Vector3(b2.x - b1.x, 0, b2.y - b1.y), v = new THREE.Vector3(t1.x - b1.x, y1 - y0, t1.y - b1.y);
+  const nn = new THREE.Vector3().crossVectors(u, v).normalize();
+  const flip = nn.x * out.x + nn.z * out.y < 0;
+  if (flip) nn.negate();
+  for (let r = 0; r <= rows; r++) {
+    const t = r / rows, l = b1.clone().lerp(t1, t), q = b2.clone().lerp(t2, t), yy = y0 + (y1 - y0) * t;
+    const vv = vr[0] + (vr[1] - vr[0]) * t; pos.push(l.x, yy, l.y, q.x, yy, q.y); uv.push(0, vv, 1, vv); nr.push(...nn.toArray(), ...nn.toArray());
+    if (r < rows) { const a = 2 * r; idx.push(...(flip ? [a, a + 3, a + 1, a, a + 2, a + 3] : [a, a + 1, a + 3, a, a + 3, a + 2])); }
+  }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nr, 3));
+  geo.setIndex(idx);
+  const m = new THREE.Mesh(geo, material); m.castShadow = m.receiveShadow = true; return m;
+}
+function hstrip(a, b, c, d, y, material) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute([a.x, y, a.y, b.x, y, b.y, c.x, y, c.y, d.x, y, d.y], 3));
+  geo.setIndex([0, 1, 2, 0, 2, 3]); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, material); m.castShadow = m.receiveShadow = true; return m;
+}
+// высоты ломаной короны над фонарём у углов плана [P1, B, Q1, Q2, A2, P2]: высокий острый угол к парку и закату
+const CROWN = [0, 0, 0, 0, 0, 0]; // фонарь ровно в 2 этажа, выразительность — в сложенной кровле над ним
+const cheekMat = new THREE.MeshStandardMaterial({ color: 0xe2ddd4, roughness: 0.6, side: THREE.DoubleSide });
+function zigPoint(type, end, o) { // точка фасада, вынесенная на o: на стыке со срезом — по биссектрисе, у торца — по нормали фасада
+  const miter = nS.clone().add(nCut).normalize(), ml = o / miter.dot(nS);
+  if (type === 'south') return end === 'a' ? P1.clone().add(miter.clone().multiplyScalar(ml)) : B.clone().add(nS.clone().multiplyScalar(o));
+  return end === 'a' ? P2.clone().add(nCut.clone().multiplyScalar(o)) : P1.clone().add(miter.clone().multiplyScalar(ml));
+}
+function cheek(edge, e0, e1, y0, y1, outDir, material) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute([edge.x, y0, edge.y, e0.x, y0, e0.y, e1.x, y1, e1.y, edge.x, y1, edge.y], 3));
+  geo.setIndex([0, 1, 2, 0, 2, 3]); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, material); m.castShadow = m.receiveShadow = true; return m;
+}
+function crownWall(p, q, y0, ytp, ytq, texH, out, material) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute([p.x, y0, p.y, q.x, y0, q.y, q.x, ytq, q.y, p.x, ytp, p.y], 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, (ytq - y0) / texH, 0, (ytp - y0) / texH], 2));
+  const d = new THREE.Vector3(q.x - p.x, 0, q.y - p.y), nn = new THREE.Vector3(out.x, 0, out.y).normalize();
+  const flip = new THREE.Vector3().crossVectors(d, new THREE.Vector3(0, 1, 0)).dot(nn) < 0;
+  geo.setIndex(flip ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3]);
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute([...nn.toArray(), ...nn.toArray(), ...nn.toArray(), ...nn.toArray()], 3));
+  const m = new THREE.Mesh(geo, material); m.castShadow = m.receiveShadow = true; return m;
+}
+function crownRoof(pl, hs, material) { // гранёная кровля: веер треугольников от центра
+  const c = pl.reduce((a, p) => a.add(p), new THREE.Vector2()).multiplyScalar(1 / pl.length), hc = hs.reduce((a, h) => a + h, 0) / hs.length;
+  const pos = [];
+  for (let k = 0; k < pl.length; k++) { const a = pl[k], b = pl[(k + 1) % pl.length]; pos.push(c.x, hc, c.y, a.x, hs[k], a.y, b.x, hs[(k + 1) % pl.length], b.y); }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, material); m.castShadow = m.receiveShadow = true; return m;
+}
+// складчатый фасад: сетка узлов (ячейка ≈ 3 окна × 3 этажа), узлы в шахматном порядке вынесены вперёд,
+// ячейки разломаны по диагонали между вынесенными узлами — получаются ромбы-грани. Края фасада остаются в плоскости.
+function origami(a, b, y0, y1, out, material, floors) {
+  const len = a.distanceTo(b), dir = new THREE.Vector2().subVectors(b, a).normalize(), n = new THREE.Vector2(out.x, out.y).normalize();
+  const N = Math.max(2, Math.round(len / 10)), M = Math.max(2, Math.round(floors / 3));
+  const H = y1 - y0, node = (k, m) => {
+    const raised = (k + m) % 2 === 1 && k > 0 && k < N && m > 0 && m < M;
+    const s = len * k / N, y = y0 + H * m / M, p = a.clone().add(dir.clone().multiplyScalar(s)).add(n.clone().multiplyScalar(raised ? opt.fold : 0));
+    return { v: [p.x, y, p.y], uv: [s / len, (y - y0) / H] };
+  };
+  const pos = [], uv = [];
+  const tri = (p, q, r) => { for (const t of [p, q, r]) { pos.push(...t.v); uv.push(...t.uv); } };
+  for (let k = 0; k < N; k++) for (let m = 0; m < M; m++) {
+    const c00 = node(k, m), c10 = node(k + 1, m), c01 = node(k, m + 1), c11 = node(k + 1, m + 1);
+    if ((k + m) % 2 === 1) { tri(c00, c10, c11); tri(c00, c11, c01); } else { tri(c00, c10, c01); tri(c10, c11, c01); }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.computeVertexNormals();
+  // развернуть треугольники лицом наружу
+  const nrm = geo.getAttribute('normal'); let dot = 0; for (let k = 0; k < nrm.count; k++) dot += nrm.getX(k) * n.x + nrm.getZ(k) * n.y;
+  if (dot < 0) { const P = geo.getAttribute('position'), U = geo.getAttribute('uv'); for (let k = 0; k < P.count; k += 3) { for (const A of [P, U]) { const t = A.array.slice(A.itemSize * (k + 1), A.itemSize * (k + 2)); A.array.copyWithin(A.itemSize * (k + 1), A.itemSize * (k + 2), A.itemSize * (k + 3)); A.array.set(t, A.itemSize * (k + 2)); } } geo.computeVertexNormals(); }
+  const mesh = new THREE.Mesh(geo, material); mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+// кровля-«оригами»: сложена из треугольных граней к двум пикам — высокому над юго-западным углом и низкому над северо-востоком
+const PEAKS = [{ at: 0.16, h: 14 }, { at: 0.78, h: 6 }]; // положение вдоль длинной оси (0 — запад, 1 — восток) и высота над фонарём
+function foldedRoof(pl, y, material) {
+  const c = pl.reduce((a, p) => a.add(p), new THREE.Vector2()).multiplyScalar(1 / pl.length);
+  const peaks = PEAKS.map(p => { const q = c.clone().add(dirS.clone().multiplyScalar((p.at - 0.5) * LEN * 0.85)); return { x: q.x, z: q.y, y: y + p.h }; });
+  const near = v => { let best = 0, bd = 1e9; peaks.forEach((p, k) => { const d = (v.x - p.x) ** 2 + (v.y - p.z) ** 2; if (d < bd) { bd = d; best = k; } }); return best; };
+  const pos = [], tri = (a, b, cc) => pos.push(...a, ...b, ...cc), P = k => [peaks[k].x, peaks[k].y, peaks[k].z];
+  for (let k = 0; k < pl.length; k++) {
+    const a = pl[k], b = pl[(k + 1) % pl.length], m = a.clone().add(b).multiplyScalar(0.5), pk = near(m);
+    tri([a.x, y, a.y], [b.x, y, b.y], P(pk));
+    const nb = pl[(k + 2) % pl.length], m2 = b.clone().add(nb).multiplyScalar(0.5);
+    if (near(m2) !== pk) tri([b.x, y, b.y], P(pk), P(near(m2)));   // грань-перемычка между пиками
+  }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, material); mesh.castShadow = mesh.receiveShadow = true; return mesh;
+}
+// Варианты крыши над двухэтажным фонарём
+function heightsAlong(pl, hWest, hEast) { // высота меняется линейно вдоль длинной оси: запад → восток
+  const ss = pl.map(p => p.dot(dirS)), lo = Math.min(...ss), hi = Math.max(...ss);
+  return ss.map(v => hWest + (hEast - hWest) * (v - lo) / (hi - lo));
+}
+function prism(pl, y0, hs, wallMat, topMat) { // объём с ровным низом и наклонным верхом
+  const g = new THREE.Group();
+  for (let k = 0; k < pl.length; k++) {
+    const a = pl[k], b = pl[(k + 1) % pl.length], d = new THREE.Vector2().subVectors(b, a).normalize();
+    g.add(crownWall(a, b, y0, y0 + hs[k], y0 + hs[(k + 1) % pl.length], 20, new THREE.Vector2(-d.y, d.x), wallMat));
+  }
+  g.add(crownRoof(pl, hs.map(h => y0 + h), topMat));
+  return g;
+}
+function buildRoof(kind, top, yL, solid, roofMat, glow, ev) {
+  if (kind === 'lid') {
+    // А. Тонкая плита шире фонаря, «парит» над ним на тёмной щели; вечером снизу — тёплая линия
+    house.add(slab(top, yL, 0.9, mat({ color: 0x2c3036 })));                           // щель-тень
+    house.add(slab(offsetPlan(top, 2.2), yL + 0.9, 0.7, solid));
+    if (ev) house.add(slab(offsetPlan(top, 2.0), yL + 0.86, 0.04, glow));
+  } else if (kind === 'wedge') {
+    // Б. Верх срезан одной наклонной плоскостью: высоко над юго-западным острым углом, низко на востоке
+    const pl = offsetPlan(top, 0.3);
+    house.add(prism(pl, yL, heightsAlong(pl, 13, 1.2), solid, roofMat));
+    if (ev) house.add(slab(offsetPlan(top, 0.35), yL - 0.04, 0.04, glow));
+  } else if (kind === 'teeth') {
+    // В. Продолжение оригами: верхний край сложен треугольниками в шаге ромбов фасада
+    house.add(slab(offsetPlan(top, 0.3), yL, 0.5, solid));
+    const pl = offsetPlan(top, 0.3), H = 7;
+    for (let k = 0; k < pl.length; k++) {
+      const a = pl[k], b = pl[(k + 1) % pl.length], len = a.distanceTo(b), n = Math.max(1, Math.round(len / 9)), d = new THREE.Vector2().subVectors(b, a).normalize();
+      for (let t = 0; t < n; t++) {
+        const p = a.clone().add(d.clone().multiplyScalar(len * t / n)), q = a.clone().add(d.clone().multiplyScalar(len * (t + 1) / n)), m = p.clone().add(q).multiplyScalar(0.5);
+        const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute([p.x, yL + 0.5, p.y, q.x, yL + 0.5, q.y, m.x, yL + 0.5 + H, m.y], 3)); geo.computeVertexNormals();
+        const tm = new THREE.Mesh(geo, solid); tm.castShadow = true; house.add(tm);
+      }
+    }
+    if (ev) house.add(slab(offsetPlan(top, 0.35), yL - 0.04, 0.04, glow));
+  } else if (kind === 'spire') {
+    // Г. Одна высокая грань-остриё над юго-западным углом: кровля — веер треугольников к вершине
+    const pl = offsetPlan(top, 0.3), c = pl.reduce((a, p) => a.add(p), new THREE.Vector2()).multiplyScalar(1 / pl.length);
+    const apex = c.clone().add(dirS.clone().multiplyScalar(-LEN * 0.28)), H = 24, pos = [];
+    for (let k = 0; k < pl.length; k++) { const a = pl[k], b = pl[(k + 1) % pl.length]; pos.push(a.x, yL, a.y, b.x, yL, b.y, apex.x, yL + H, apex.y); }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, roofMat); m.castShadow = true; house.add(m);
+    if (ev) house.add(slab(offsetPlan(top, 0.35), yL - 0.04, 0.04, glow));
+  } else {
+    house.add(slab(offsetPlan(top, 0.4), yL, 0.6, solid));
+    if (ev) house.add(slab(offsetPlan(top, 0.35), yL - 0.04, 0.04, glow));
+  }
+}
+function slab(pl, y, thick, mat) {
+  const shape = new THREE.Shape(pl.map(p => new THREE.Vector2(p.x, -p.y)));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: thick, bevelEnabled: false }); geo.rotateX(-Math.PI / 2);
+  const m = new THREE.Mesh(geo, mat); m.position.y = y; m.castShadow = m.receiveShadow = true; return m;
+}
+function offsetPlan(pl, d) {
+  const L = pl.map((p, i) => { const q = pl[(i + 1) % pl.length], dir = new THREE.Vector2().subVectors(q, p).normalize(); const dd = typeof d === 'function' ? d(i) : d; return { p: p.clone().add(new THREE.Vector2(-dir.y, dir.x).multiplyScalar(dd)), dir }; });
+  return pl.map((_, i) => { const l1 = L[(i + pl.length - 1) % pl.length], l2 = L[i]; const t = ((l2.p.x - l1.p.x) * l2.dir.y - (l2.p.y - l1.p.y) * l2.dir.x) / (l1.dir.x * l2.dir.y - l1.dir.y * l2.dir.x); return new THREE.Vector2(l1.p.x + l1.dir.x * t, l1.p.y + l1.dir.y * t); });
+}
+const mat = (o) => new THREE.MeshStandardMaterial({ roughness: 0.8, ...o });
+const warm = 0xffb768;
+
+let house = new THREE.Group(); scene.add(house);
+function build() {
+  scene.remove(house); house = new THREE.Group();
+  seed = 11;
+  const ev = opt.evening;
+  const mainFloors = opt.lantern ? FLOORS - LANTERN : FLOORS;
+  const yBase = PODIUM_H, yMain = PODIUM_H + mainFloors * FLOOR_H;
+  const bot = planAt(0), top = planAt(1);
+  for (const [i, j, out, type] of WALLS) {
+    const len = bot[i].distanceTo(bot[j]);
+    const winFn = type === 'south' ? moduleWindows(len, opt.win)
+      : type === 'cut' ? () => [[(len - Math.min(opt.win + 0.4, len - 0.8)) / 2, Math.min(opt.win + 0.4, len - 0.8)]]
+      : type === 'eastEnd' ? endWindows(len, true, opt.win) : type === 'westEnd' ? endWindows(len, false, opt.win)
+      : type === 'north' ? northWindows(len) : () => [];
+    const zig = opt.saw && (type === 'south' || type === 'cut');
+    const m = facadeMaps(len, mainFloors, { windows: winFn, evening: ev, noseLight: zig, ceramic: opt.ceramic && type !== 'north' && type !== 'service', parapet: opt.lantern ? 0 : 1.2 });
+    const material = new THREE.MeshPhysicalMaterial({ map: m.map, roughnessMap: m.roughnessMap, roughness: 1, metalness: 0, clearcoat: opt.ceramic ? 0.35 : 0, clearcoatRoughness: 0.35, emissive: 0xffffff, emissiveMap: m.emissiveMap, emissiveIntensity: ev ? 1 : 0 });
+    if (type === 'south') house.add(origami(bot[i], bot[j], yBase, yMain, out, material, mainFloors));
+    else if (!zig) house.add(quad(bot[i], bot[j], top[i], top[j], yBase, opt.lantern ? yMain : yMain + 1.2, out, material));
+    else {
+      // зигзаг: на чётных перекрытиях фасад в своей плоскости, на нечётных — вынесен вперёд на opt.sawDepth
+      const Htex = mainFloors * FLOOR_H + (opt.lantern ? 0 : 1.2);
+      const off = k => (k % 2 === 1 ? opt.sawDepth : 0);
+      for (let f = 0; f < mainFloors; f++) {
+        const y0 = yBase + f * FLOOR_H, y1 = y0 + FLOOR_H;
+        const pa = zigPoint(type, 'a', off(f)), pb = zigPoint(type, 'b', off(f)), qa = zigPoint(type, 'a', off(f + 1)), qb = zigPoint(type, 'b', off(f + 1));
+        house.add(quad(pa, pb, qa, qb, y0, y1, out, material, 1, [f * FLOOR_H / Htex, (f + 1) * FLOOR_H / Htex]));
+        // «щёчка» на стыке с торцом, чтобы зигзаг не оставлял щели
+        const [edge, side] = type === 'south' ? [B, dirS] : [P2, new THREE.Vector2().subVectors(P2, P1).normalize()];
+        const e0 = type === 'south' ? pb : pa, e1 = type === 'south' ? qb : qa;
+        house.add(cheek(edge, e0, e1, y0, y1, side, cheekMat));
+      }
+      if (!opt.lantern) house.add(quad(top[i], top[j], top[i], top[j], yMain, yMain + 1.2, out, mat({ color: 0xe2ddd4 })));
+    }
+    if (opt.lantern) {
+      // ломаная корона: у каждого угла своя высота верха, фонарь — стеклянные стены до этой линии
+      const hi = opt.crown ? CROWN[i] : 0, hj = opt.crown ? CROWN[j] : 0, maxH = LANTERN * FLOOR_H + Math.max(...CROWN);
+      const lm = facadeMaps(top[i].distanceTo(top[j]), Math.ceil(maxH / FLOOR_H), { allGlass: true, evening: ev });
+      const lmat = mat({ map: lm.map, roughness: 0.2, metalness: 0.1, emissive: 0xffffff, emissiveMap: lm.emissiveMap, emissiveIntensity: ev ? 1.0 : 0 });
+      house.add(crownWall(top[i], top[j], yMain, yMain + LANTERN * FLOOR_H + hi, yMain + LANTERN * FLOOR_H + hj, Math.ceil(maxH / FLOOR_H) * FLOOR_H, out, lmat));
+    }
+  }
+  const concrete = mat({ color: 0xe2ddd4 });
+  if (opt.lantern) {
+    house.add(slab(top, yMain - 0.2, 0.35, concrete));
+    const yL = yMain + LANTERN * FLOOR_H;
+    const roofMat = mat({ color: opt.ceramic ? 0xefe9de : 0xe2ddd4, side: THREE.DoubleSide, roughness: 0.4, emissive: ev ? 0x4a3418 : 0, emissiveIntensity: ev ? 0.55 : 0 });
+    const solid = mat({ color: opt.ceramic ? 0xefe9de : 0xe2ddd4, side: THREE.DoubleSide, roughness: 0.4 });
+    const glow = mat({ color: 0xffd9a0, emissive: warm, emissiveIntensity: 0.9 });
+    buildRoof(opt.roof, top, yL, solid, roofMat, glow, ev);
+  } else house.add(slab(top, yMain + 1.15, 0.05, mat({ color: 0xc9c5be })));
+
+  // ---- Стеклянный подиум шире башни ----
+  const pplan = offsetPlan(basePlan, i => [9, 5, 2, 0, 5, 7][i]);
+  const PH = PODIUM_H - 0.5;
+  for (let i = 0; i < pplan.length; i++) {
+    const p = pplan[i], q = pplan[(i + 1) % pplan.length], dir = new THREE.Vector2().subVectors(q, p).normalize(), len = p.distanceTo(q);
+    const c = document.createElement('canvas'); c.width = Math.round(len * 16); c.height = Math.round(PH * 16);
+    const g = c.getContext('2d'); g.fillStyle = ev ? '#f0cf9c' : '#a3b1bc'; g.fillRect(0, 0, c.width, c.height);
+    g.strokeStyle = '#30353b'; g.lineWidth = 2; for (let x = 0; x <= len; x += 1.5) { g.beginPath(); g.moveTo(x * 16, 0); g.lineTo(x * 16, c.height); g.stroke(); }
+    g.beginPath(); g.moveTo(0, c.height - 4.5 * 16); g.lineTo(c.width, c.height - 4.5 * 16); g.stroke();
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    house.add(quad(p, q, p, q, 0.5, PH, new THREE.Vector2(-dir.y, dir.x), mat({ map: t, roughness: 0.15, metalness: 0.2, emissive: ev ? 0x8a6234 : 0, emissiveIntensity: ev ? 0.75 : 0 })));
+  }
+  house.add(slab(offsetPlan(pplan, 0.8), PH, 0.5, mat({ color: 0xeeeae3 })));
+  if (ev) house.add(slab(offsetPlan(pplan, 0.7), PH - 0.04, 0.04, mat({ color: 0xffd9a0, emissive: warm, emissiveIntensity: 0.8 }))); // свет под кромкой кровли подиума
+  house.add(slab(pplan, 0, 0.5, mat({ color: 0xd8c9ad })));
+  house.add(slab(basePlan, PH + 0.5, PODIUM_H - PH - 0.5, concrete));
+  scene.add(house);
+
+  document.getElementById('winLabel').textContent = `${opt.win.toFixed(1).replace('.', ',')} м из ${MODULE.toString().replace('.', ',')} (простенок ${(MODULE - opt.win).toFixed(1).replace('.', ',')} м)`;
+  document.getElementById('dims').textContent =
+    `Параллелограмм, повёрнут на ${ROT}°, ${FLOORS} этажей на 2-этажном подиуме. Острые углы срезаны.` +
+    (opt.taper ? ` Торцы сходятся кверху на ${TAPER} м с каждой стороны.` : '') +
+    (opt.lantern ? ' Фонарь — 2 верхних этажа.' : '') + (` Южный фасад сложен ромбами, вынос складки ${opt.fold.toFixed(1).replace('.', ',')} м.`) + (opt.saw ? ` Зигзаг через 2 этажа: вынос ${opt.sawDepth.toFixed(2).replace('.', ',')} м, наклон стекла ≈ ${(Math.atan(opt.sawDepth / FLOOR_H) / rad).toFixed(0)}°.` : '') + ({ lid: ' Крыша: парящая плита.', wedge: ' Крыша: наклонный срез.', teeth: ' Крыша: зубчатая корона.', spire: ' Крыша: кристалл-остриё.', flat: ' Крыша плоская.' }[opt.roof] || '') + (opt.ceramic ? ' Простенки — светлая глазурованная керамика.' : '');
+  document.getElementById('foldLabel').textContent = `${opt.fold.toFixed(1).replace('.', ',')} м`;
+  applyLight();
+}
+
+// ---- Участок и парк ----
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600), mat({ color: 0xc9ccc8, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const park = new THREE.Mesh(new THREE.PlaneGeometry(300, 200), mat({ color: 0xbcc5b6, roughness: 1 }));
+park.rotation.x = -Math.PI / 2; park.position.set(0, 0.02, 145); park.receiveShadow = true; scene.add(park);
+let s2 = 7; const rnd2 = () => (s2 = (s2 * 16807) % 2147483647) / 2147483647;
+const trunkMat = mat({ color: 0x8b8680 }), crownMat = mat({ color: 0xa9aea4, roughness: 1 });
+for (let i = 0; i < 50; i++) {
+  const x = (rnd2() - 0.5) * 280, z = 60 + rnd2() * 170;
+  if (Math.abs(x - (2 + (z - 8) * 0.36)) < 24) continue;
+  const h = 7 + rnd2() * 6;
+  const t = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, h * 0.5), trunkMat); t.position.set(x, h * 0.25, z); t.castShadow = true; scene.add(t);
+  const cr = new THREE.Mesh(new THREE.SphereGeometry(h * 0.32, 10, 8), crownMat); cr.position.set(x, h * 0.65, z); cr.castShadow = true; scene.add(cr);
+}
+
+// ---- Свет: день / 15 ноября / вечер ----
+function sunPos(t) {
+  const H = 15 * (t - 12) * rad, phi = LAT * rad, d = DECL * rad;
+  const alt = Math.asin(Math.sin(phi) * Math.sin(d) + Math.cos(phi) * Math.cos(d) * Math.cos(H));
+  const az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(d) * Math.cos(phi));
+  return { alt, az };
+}
+const sunToggle = document.getElementById('sunToggle'), tSlider = document.getElementById('tSlider');
+function applyLight() {
+  const t = +tSlider.value;
+  document.getElementById('tLabel').textContent = `${Math.floor(t)}:${String(Math.round((t % 1) * 60)).padStart(2, '0')}`;
+  let dir;
+  if (opt.evening) {
+    scene.background = new THREE.Color(0x3c4d68); hemi.color.set(0x8fa3c4); hemi.groundColor.set(0x30343a); hemi.intensity = 0.45;
+    dir = new THREE.Vector3(-0.7, 0.25, -0.6); sun.intensity = 0.12;
+    document.getElementById('sunInfo').textContent = 'Вечер: горит часть окон, светятся корона-фонарь и подиум.';
+  } else if (sunToggle.checked) {
+    scene.background = new THREE.Color(0xdcdfe3); hemi.color.set(0xffffff); hemi.groundColor.set(0xb8bcc0);
+    const { alt, az } = sunPos(t);
+    dir = new THREE.Vector3(-Math.sin(az) * Math.cos(alt), Math.sin(alt), Math.cos(az) * Math.cos(alt));
+    sun.intensity = alt > 0 ? 2.4 : 0; hemi.intensity = 0.6;
+    document.getElementById('sunInfo').textContent = alt > 0 ? `Высота солнца ${(alt / rad).toFixed(1)}°, азимут ${(az / rad).toFixed(0)}° от юга` : 'Солнце ниже горизонта';
+  } else {
+    scene.background = new THREE.Color(0xdcdfe3); hemi.color.set(0xffffff); hemi.groundColor.set(0xb8bcc0);
+    dir = new THREE.Vector3(-0.6, 0.55, 0.58); sun.intensity = 1.5; hemi.intensity = 0.95;
+    document.getElementById('sunInfo').textContent = 'Нейтральный дневной свет (для референса)';
+  }
+  sun.position.copy(dir.normalize().multiplyScalar(450)); sun.target.position.set(0, 0, 0);
+}
+sunToggle.onchange = applyLight; tSlider.oninput = applyLight;
+document.getElementById('foldSlider').value = opt.fold;
+document.getElementById('roofSel').value = opt.roof;
+document.getElementById('roofSel').onchange = e => { opt.roof = e.target.value; build(); };
+document.getElementById('foldSlider').oninput = e => { opt.fold = +e.target.value; build(); };
+for (const [id, k] of [['optTaper', 'taper'], ['optLantern', 'lantern'], ['optSaw', 'saw'], ['optCrown', 'crown'], ['optCeramic', 'ceramic'], ['eveningToggle', 'evening']])
+  document.getElementById(id).onchange = e => { opt[k] = e.target.checked; build(); };
+document.getElementById('winSlider').oninput = e => { opt.win = +e.target.value; build(); };
+
+const views = {
+  park:   { pos: [80, 6, 235], target: [2, 56, 8] },
+  far:    { pos: [-170, 40, 460], target: [0, 56, 0] },
+  aerial: { pos: [-90, 160, 240], target: [0, 56, 0] },
+  corner: { pos: [-140, 35, 140], target: [-15, 56, 5] },
+  close:  { pos: [-10, 60, 60], target: [4, 64, 6] },
+  crown:  { pos: [-75, 125, 120], target: [0, 106, 5] },
+  base:   { pos: [-28, 5, 62], target: [0, 8, 6] },
+};
+function setView(name) {
+  const v = views[name]; if (!v) return;
+  camera.position.set(...v.pos); controls.target.set(...v.target); controls.update();
+  document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === name));
+}
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
+
+if (params.get('sun')) sunToggle.checked = true;
+if (params.get('t')) tSlider.value = params.get('t');
+build();
+setView(params.get('view') || 'park');
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>
