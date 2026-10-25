@@ -49,11 +49,13 @@
   <div><button data-type="living">Гостиная</button><button data-type="bedroom">Спальня</button><button data-type="lounge">Гостиная с камином</button></div>
   <label><input type="checkbox" id="furn"> Мебель</label>
   <label><input type="checkbox" id="person"> Человек 1,75 м</label>
+  <label>Объектив: <span id="fovLabel"></span><input type="range" id="fov" min="30" max="95" step="1"></label>
+  <div><button id="copyCam">Ссылка на этот кадр</button></div>
+  <div style="color:#555;font-size:12px;margin-top:4px">Мышь с зажатой кнопкой — повернуть голову. WASD или стрелки — идти, Q / E — ниже / выше, колесо — вперёд / назад. Shift — быстрее, Alt — очень точно (и для мыши тоже).</div>
   <div id="info"></div>
 </div>
 <script type="module">
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const V2 = THREE.Vector2, V3 = THREE.Vector3;
 
 // ---- Те же параметры дома, что в grani-40-kvartal (вынос 6 м, грань 2 окна × 5 этажей) ----
@@ -92,7 +94,30 @@ renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.A
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.05, 6000);
-const controls = new OrbitControls(camera, renderer.domElement);
+// ---- Камера «от первого лица»: мышь поворачивает, клавиши двигают ----
+const look = { yaw: 0, pitch: 0 }, keys = new Set();
+function lookAt(pos, tgt) { camera.position.copy(pos); const d = tgt.clone().sub(pos).normalize(); look.yaw = Math.atan2(-d.x, -d.z); look.pitch = Math.asin(d.y); applyLook(); }
+function applyLook() { look.pitch = Math.max(-1.45, Math.min(1.45, look.pitch)); camera.rotation.set(look.pitch, look.yaw, 0, 'YXZ'); }
+let drag = null;
+renderer.domElement.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; renderer.domElement.setPointerCapture(e.pointerId); });
+renderer.domElement.addEventListener('pointermove', e => { if (!drag) return; const k = (e.altKey ? 0.0006 : 0.0025) * (camera.fov / 60); look.yaw -= (e.clientX - drag.x) * k; look.pitch -= (e.clientY - drag.y) * k; drag = { x: e.clientX, y: e.clientY }; applyLook(); });
+renderer.domElement.addEventListener('pointerup', () => { drag = null; });
+renderer.domElement.addEventListener('wheel', e => { e.preventDefault(); const f = new V3(); camera.getWorldDirection(f); camera.position.addScaledVector(f, -e.deltaY * (e.altKey ? 0.0008 : 0.004)); }, { passive: false });
+addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; keys.add(e.code); if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault(); });
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+let lastT = performance.now();
+function moveStep() { // шаг движения за кадр: обычный 1,5 м/с, Shift — 4 м/с, Alt — 0,25 м/с
+  const now = performance.now(), dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  const sp = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 4 : keys.has('AltLeft') || keys.has('AltRight') ? 0.25 : 1.5) * dt;
+  const fwd = new V3(-Math.sin(look.yaw), 0, -Math.cos(look.yaw)), right = new V3(Math.cos(look.yaw), 0, -Math.sin(look.yaw));
+  if (keys.has('KeyW') || keys.has('ArrowUp')) camera.position.addScaledVector(fwd, sp);
+  if (keys.has('KeyS') || keys.has('ArrowDown')) camera.position.addScaledVector(fwd, -sp);
+  if (keys.has('KeyD') || keys.has('ArrowRight')) camera.position.addScaledVector(right, sp);
+  if (keys.has('KeyA') || keys.has('ArrowLeft')) camera.position.addScaledVector(right, -sp);
+  if (keys.has('KeyE') || keys.has('PageUp')) camera.position.y += sp;
+  if (keys.has('KeyQ') || keys.has('PageDown')) camera.position.y -= sp;
+}
 const hemi = new THREE.HemisphereLight(0xffffff, 0x8a8f86, 0.7); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff1dc, 3); sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096);
 Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 400 }); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.03;
@@ -291,7 +316,7 @@ function setView(name) {
   if (name === 'seated') { pos = W(sm, opt.type === 'living' ? -4.7 : -APT + 1.6, yF + (opt.type === 'living' ? 1.1 : 1.2)); tgt = W(sm, 6, yF + 1.0); }
   if (name === 'plan') { pos = W(sm, -1, room.yC + 14); tgt = W(sm, -1, yF); }
   camera.fov = name === 'hero' ? 58 : 62; camera.updateProjectionMatrix(); // по оси — объектив чуть уже, меньше потолка
-  camera.position.copy(pos); controls.target.copy(tgt); controls.update();
+  lookAt(pos, tgt); document.getElementById('fov').value = camera.fov; document.getElementById('fovLabel').textContent = Math.round(camera.fov) + '°';
   house.children.forEach(c => { if (c.material === CEIL || c.material === GLOW) c.visible = name !== 'plan'; });
   document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === name));
   curView = name;
@@ -309,7 +334,15 @@ document.querySelectorAll('[data-type]').forEach(b => b.onclick = () => { opt.ty
 document.querySelectorAll('[data-time]').forEach(b => b.onclick = () => { opt.time = +b.dataset.time; applyTime(); });
 build(); setView(curView);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { moveStep(); renderer.render(scene, camera); });
+// объектив и ссылка на кадр
+const fovEl = document.getElementById('fov'); fovEl.oninput = () => { camera.fov = +fovEl.value; camera.updateProjectionMatrix(); document.getElementById('fovLabel').textContent = fovEl.value + '°'; };
+document.getElementById('copyCam').onclick = () => {
+  const p = camera.position, q = new URLSearchParams({ type: opt.type, floor: opt.floor, room: opt.room, width: opt.width, t: opt.time, furn: opt.furn ? 1 : 0, cam: [p.x, p.y, p.z, look.yaw, look.pitch, camera.fov].map(v => v.toFixed(3)).join(',') });
+  const url = location.origin + location.pathname + '?' + q.toString();
+  navigator.clipboard?.writeText(url).then(() => { document.getElementById('copyCam').textContent = 'Ссылка скопирована'; setTimeout(() => document.getElementById('copyCam').textContent = 'Ссылка на этот кадр', 1500); }, () => prompt('Ссылка на кадр:', url));
+};
+if (params.get('cam')) { const [x, y, z, yw, pt, fv] = params.get('cam').split(',').map(Number); camera.position.set(x, y, z); look.yaw = yw; look.pitch = pt; camera.fov = fv; camera.updateProjectionMatrix(); applyLook(); fovEl.value = fv; document.getElementById('fovLabel').textContent = Math.round(fv) + '°'; }
 </script>
 </body>
 </html>
