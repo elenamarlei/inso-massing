@@ -28,6 +28,7 @@
   <div>
     <button data-view="park">Из парка</button>
     <button data-view="street">С тротуара у парка</button>
+    <button data-view="entrance">Главный вход</button>
     <button data-view="territory">Территория</button>
     <button data-view="west">Запад: пруд</button>
     <button data-view="east">Восток: спорт</button>
@@ -271,6 +272,18 @@ function build() {
     g.beginPath(); g.moveTo(0, c.height - 4.5 * PX); g.lineTo(c.width, c.height - 4.5 * PX); g.stroke();
     house.add(wall(p, q, 0.5, PH, new V2(-d.y, d.x), mat({ map: toTex(c), roughness: 0.15, metalness: 0.2, emissive: ev ? 0x8a6234 : 0, emissiveIntensity: ev ? 0.75 : 0 })));
   }
+  // главный вход в лобби: северная стена подиума, по центру; стеклянный портал в два этажа без козырька, внутри тёплый свет, порог из травертина вровень с землёй
+  { const dark = mat({ color: 0x2f3338, metalness: 0.4, roughness: 0.4 }), z = R.z0 - 0.1, W = 14, H = 8;
+    const glass = mat({ color: ev ? 0xf4dcb0 : 0xa3b6c6, roughness: 0.1, metalness: 0.3, emissive: ev ? warm : 0x000000, emissiveIntensity: ev ? 0.9 : 0 });
+    const part = (x0, y0, x1, y1, m) => { const fr = m === dark, b = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, fr ? 0.2 : 0.25), m); b.position.set((x0 + x1) / 2, (y0 + y1) / 2, fr ? z - 0.18 : z); b.castShadow = true; house.add(b); };
+    part(-W / 2, 0.5, W / 2, H, glass);                                   // витрина портала
+    for (const x of [-W / 2, -W / 6, W / 6, W / 2]) part(x - 0.1, 0.5, x + 0.1, H, dark);  // импосты: три секции, в средней двери
+    for (const x of [-W / 6 + 1.2, W / 6 - 1.2]) part(x - 0.04, 0.5, x + 0.04, 3.6, dark);   // створки распашных дверей
+    for (const x of [-1.8, 1.8]) part(x - 0.5, 1.2, x + 0.5, 1.35, dark); // ручки-накладки
+    part(-W / 2, H - 0.1, W / 2, H + 0.1, dark); part(-W / 2, 3.6, W / 2, 3.8, dark);       // ригель над дверями
+    part(-W / 6 - 0.1, 0.5, W / 6 + 0.1, 0.65, dark);
+    const step = new THREE.Mesh(new THREE.BoxGeometry(W + 3, 0.12, 3.2), mat({ color: 0xe8e1d4 })); step.position.set(0, 0.06, z - 1.5); step.receiveShadow = true; house.add(step);  // травертиновый порог
+    if (ev) { const g = new THREE.PointLight(0xffc27a, 60, 24); g.position.set(0, 3, z - 4); house.add(g); } }
   house.add(slab(offsetPlan(pplan, 0.8), PH, 0.5, ceramic));
   if (ev) house.add(slab(offsetPlan(pplan, 0.7), PH - 0.04, 0.04, mat({ color: 0xffd9a0, emissive: warm, emissiveIntensity: 0.8 })));
   house.add(slab(pplan, 0, 0.5, mat({ color: 0xd8c9ad })));                                         // травертиновый цоколь
@@ -296,7 +309,7 @@ function rect(x0, z0, x1, z1, color, y, extra = {}) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(Math.abs(x1 - x0), Math.abs(z1 - z0)), mat({ color, roughness: 1, ...extra }));
   m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); flat(m, y); TARGET.add(m); return m;
 }
-const C = { city: 0xc4c5c2, road: 0xa6a8a8, walk: 0xd9d4cb, lawn: 0xbcc5b6, yard: 0xc3ccb9, stone: 0xe8e1d4, trav: 0xddd0b8, water: 0x9fb3bd, play: 0xd4c2a8, mark: 0xf2f2ee };
+const C = { city: 0xcdcdc5, road: 0x6c6f73, walk: 0xdcd7ce, lawn: 0xbcc5b6, yard: 0xc3ccb9, stone: 0xe8e1d4, trav: 0xddd0b8, water: 0x9fb3bd, play: 0xd4c2a8, mark: 0xf2f2ee };
 const hedgeMat = mat({ color: 0x9fa897, roughness: 1 }), benchMat = mat({ color: 0xc9b89c });
 function boxAt(x0, z0, x1, z1, h, material, y = 0) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(Math.abs(x1 - x0), h, Math.abs(z1 - z0)), material);
@@ -468,13 +481,16 @@ function buildTerritory() {
 
   // ---- парадный двор: овальный подъезд с высадкой, в центре фонтан-корона, въезд в паркинг с улицы ----
   const cz = (T.z0 + R.z0) / 2 - 2;
-  rect(-5, T.z0, 5, cz - 13, C.road, 0.05);
+  rect(-5, S.plazaN, 5, cz - 13, C.road, 0.05);
   ellipse(0, cz, 20, 15, C.road, 0.05); ellipse(0, cz, 14, 9.5, K.prom, 0.055); ellipse(0, cz, 9, 6, C.water, 0.06, { roughness: 0.05, metalness: 0.4 });
   for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; jetArc(Math.cos(a) * 8.5, cz + Math.sin(a) * 5.6, Math.cos(a) * 2, cz + Math.sin(a) * 1.3, 1.4, 0.06); }
   FEATURES.push(['фонтан-корона, подъезд с высадкой', 0, 8, cz]);
-  rect(-23.8, cz + 15, 23.8, R.z0, K.prom, 0.052); // площадка у входа в лобби
+  rect(-12, cz + 8, 12, R.z0, K.prom, 0.056);   // каменная площадка перед главным входом, на ширину портала с запасом
+  // пешеходные дорожки от северного тротуара вокруг овала к входу: слева и справа, асфальт подъезда обходят
+  for (const sd of [-1, 1]) ribbon([new V2(sd * 24, S.plazaN), new V2(sd * 22, cz - 6), new V2(sd * 20, cz + 8), new V2(sd * 9, R.z0 - 6), new V2(sd * 4, R.z0 - 1)], 3.5, K.prom, 0.057);
+  FEATURES.push(['главный вход в лобби', 0, 12, R.z0 - 2]);
   boxAt(14, T.z0, 22, T.z0 + 7, 1.2, mat({ color: 0xcfc8bc })); FEATURES.push(['въезд в паркинг', 18, 5, T.z0 + 3]);
-  for (const x of [-21.5, 21.5]) for (let z = T.z0 + 10; z < cz + 12; z += 8) tree(x, z, 7);
+  for (const x of [-27, 27]) for (let z = T.z0 + 10; z < cz + 12; z += 8) tree(x, z, 7);
 }
 
 // уличные тренажёры: турник, брусья, рукоход, скамья для пресса, жим ногами, эллипс, твистер — узнаваемые силуэты, без мелочей
@@ -532,7 +548,7 @@ function neighbourYard(x0, z0, x1, z1, level, seed) {
   // проезд вдоль корпуса с машинами у тротуара (только у ближних дворов)
   if (level > 1 && d > 36) {
     const north = r() < 0.5, zA = north ? z0 + 1 : z1 - 7;
-    rect(x0 + 1, zA, x1 - 1, zA + 6, C.road, 0.061);
+    rect(x0 + 1, zA, x1 - 1, zA + 6, C.road, 0.061); rect(x0 + 1, zA + 2.9, x1 - 1, zA + 3.1, C.mark, 0.0615);
     for (let x = x0 + 4; x < x1 - 6; x += 5.5) if (r() < 0.65) rotBox(x, north ? zA + 1.3 : zA + 4.7, 4.4, 1.8, 1.4, 0, CAR_MATS[Math.floor(r() * 5)], 0.1);
     if (north) iz0 = z0 + 8; else iz1 = z1 - 8;
   }
@@ -561,6 +577,21 @@ function neighbourYard(x0, z0, x1, z1, level, seed) {
   for (const [gx, gz] of [[x0 + 6, iz0 + 6], [x1 - 6, iz0 + 6], [x0 + 6, cz], [x1 - 6, cz]]) if (r() < 0.75) for (let k = 0; k < 3 + Math.floor(r() * 3); k++) YARD_TREES.push([gx + (r() - 0.5) * 8, gz + (r() - 0.5) * 8, 6 + r() * 4]);
 }
 
+// пешеходный переход: полосы вдоль движения 0,5 м через 0,5 м шириной 4 м, стоп-линии за 1,5 м, тактильная плитка и пандусы у бордюра, светофор и знак на каждой стороне
+function zebra(xc, zA, zB, signals) {
+  const mk = (x0, z0, x1, z1) => rect(x0, z0, x1, z1, C.mark, 0.064), road = zB - zA, mid = (zA + zB) / 2;
+  for (let z = zA + 0.8; z + 0.5 <= zB - 0.5; z += 1) mk(xc - 2, z, xc + 2, z + 0.5);
+  mk(xc - 3.5 - 0.4, zA + 0.4, xc - 3.5, mid - 0.15); mk(xc + 3.5, mid + 0.15, xc + 3.5 + 0.4, zB - 0.4); // стоп-линии на своей полосе
+  const tact = (z0, z1) => rect(xc - 2, z0, xc + 2, z1, 0xcdb04e, 0.063);
+  tact(zA - 0.8, zA); tact(zB, zB + 0.8);
+  for (const [z, d] of [[zA - 1.2, -1], [zB + 1.2, 1]]) { // светофор на стойке и знак «пешеходный переход»
+    const x = xc + 3, pm = mat({ color: 0x3b3f44 });
+    boxAt(x - 0.07, z - 0.07, x + 0.07, z + 0.07, 3.2, pm);
+    if (signals) { boxAt(x - 0.2, z - 0.15, x + 0.2, z + 0.15, 0.9, pm, 2.3); boxAt(x - 0.12, z + d * 0.16 - 0.02, x + 0.12, z + d * 0.16 + 0.02, 0.14, mat({ color: 0xd96a5a, emissive: 0x6a2a20 }), 3.0); boxAt(x - 0.12, z + d * 0.16 - 0.02, x + 0.12, z + d * 0.16 + 0.02, 0.14, mat({ color: 0x7fb88a, emissive: 0x24402a }), 2.45); }
+    else boxAt(x - 0.3, z - 0.03, x + 0.3, z + 0.03, 0.6, mat({ color: 0x2f5fa0 }), 2.5);
+  }
+  for (const d of [-1, 1]) for (const z of [d < 0 ? zA - 3 : zB + 3]) boxAt(xc - 1.9 - 0.08, z - 0.08, xc - 1.9 + 0.08, z + 0.08, 0.9, mat({ color: 0x3b3f44 })); // столбики у въезда на тротуар
+}
 function buildGround() {
   const ground = rect(-4000, -4000, 4000, 4000, C.city, 0);
   // юг: тротуар с деревьями и кустами → дорога → тротуар у парка → парк
@@ -578,9 +609,14 @@ function buildGround() {
   rect(S.roadW, S.roadN, S.roadW + 12, S.roadS, C.road, 0.035);
   rect(S.roadW + 12, S.plazaN, T.x0, R.z1, C.walk, 0.045); rect(T.x1, S.plazaN, S.roadE0, R.z1, C.walk, 0.045);
   rect(S.roadE0, S.roadN, S.roadE1, S.roadS, C.road, 0.035);
-  // разметка и переход к парку
-  for (const zc of [(S.walkS + S.roadS) / 2, (S.roadN + S.plazaN) / 2]) for (let x = -700; x < 700; x += 9) rect(x, zc - 0.08, x + 3, zc + 0.08, C.mark, 0.06);
-  for (let i = 0; i < 8; i++) rect(-6 + i * 1.1, S.walkS + 0.5, -5.5 + i * 1.1, S.roadS - 0.5, C.mark, 0.065);
+  // разметка: осевая пунктиром, линии у кромок, переходы (у парка и на северной улице там, где к входу подходят дорожки)
+  const XW = [-6, -24, 24];
+  for (const [zA, zB] of [[S.walkS, S.roadS], [S.roadN, S.plazaN]]) {
+    const zc = (zA + zB) / 2;
+    for (let x = -700; x < 700; x += 9) if (!(zA === S.walkS ? [-6] : [-24, 24, 0]).some(c => Math.abs(x + 1.5 - c) < 9)) rect(x, zc - 0.08, x + 3, zc + 0.08, C.mark, 0.062);
+    rect(-700, zA + 0.25, 700, zA + 0.35, C.mark, 0.061); rect(-700, zB - 0.35, 700, zB - 0.25, C.mark, 0.061);
+  }
+  zebra(-6, S.walkS, S.roadS, true); zebra(-24, S.roadN, S.plazaN, false); zebra(24, S.roadN, S.plazaN, false);
 
   // тротуар перед подиумом: небольшие деревья через 9 м, между ними кусты
   for (let x = -700; x < 700; x += 9) {
@@ -732,10 +768,33 @@ function buildCity() {
     TARGET = scene; scene.add(yardGroup);
   }
   yardGroup.visible = opt.nb;
+  { // улицы между кварталами: тротуар 3,5 м, проезжая часть 15 м, осевая пунктиром, на ближних перекрёстках переходы
+    const asph = newCol(), sidew = newCol(), dash = newCol(), zeb = newCol(), SW = 3.5;
+    const strip = (x0, z0, x1, z1, alongZ) => {
+      if (alongZ) { pushFlat(sidew, x0, z0, x0 + SW, z1, 0.036); pushFlat(sidew, x1 - SW, z0, x1, z1, 0.036); pushFlat(asph, x0 + SW, z0, x1 - SW, z1, 0.034); const xm = (x0 + x1) / 2; for (let z = z0 + 2; z < z1 - 6; z += 8) pushFlat(dash, xm - 0.08, z, xm + 0.08, z + 3, 0.038); }
+      else { pushFlat(sidew, x0, z0, x1, z0 + SW, 0.036); pushFlat(sidew, x0, z1 - SW, x1, z1, 0.036); pushFlat(asph, x0, z0 + SW, x1, z1 - SW, 0.034); const zm = (z0 + z1) / 2; for (let x = x0 + 2; x < x1 - 6; x += 8) pushFlat(dash, x, zm - 0.08, x + 3, zm + 0.08, 0.038); }
+    };
+    for (let zz = S.city - 30 + 22 * (BD + ST); zz > -2300; zz -= BD + ST) for (let x0 = -2300; x0 < 2300; x0 += BW + ST) {
+      const x1 = x0 + BW, z1 = zz, z0 = zz - BD;
+      if (NO_CITY.some(([a, b, c, d]) => x0 < c && x1 > a && z0 - ST < d && z1 > b)) continue;
+      strip(x1, z0 - ST, x1 + ST, z1, true);   // улица вдоль севера–юга справа от квартала
+      strip(x0, z0 - ST, x1, z0, false);       // улица вдоль запада–востока под кварталом
+      if (Math.hypot(x1 + ST / 2, z0 - ST / 2) < 500) { // переходы на четырёх рукавах перекрёстка
+        const ix = x1 + ST / 2, iz = z0 - ST / 2, W = ST - 2 * SW;
+        for (const sd of [-1, 1]) {
+          const cx = ix + sd * (ST / 2 + 2.2), cz = iz + sd * (ST / 2 + 2.2);
+          for (let z = iz - W / 2 + 0.8; z + 0.5 <= iz + W / 2 - 0.5; z += 1.0) pushFlat(zeb, cx - 2, z, cx + 2, z + 0.5, 0.039);
+          for (let x = ix - W / 2 + 0.8; x + 0.5 <= ix + W / 2 - 0.5; x += 1.0) pushFlat(zeb, x, cz - 2, x + 0.5, cz + 2, 0.039);
+        }
+      }
+    }
+    const gm = (c, color, y) => { if (!c.pos.length) return; const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(c.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(c.nor, 3)); const m = flat(new THREE.Mesh(g, mat({ color, roughness: 1, side: THREE.DoubleSide })), y); city.add(m); };
+    gm(sidew, C.walk, 0.036); gm(asph, C.road, 0.034); gm(dash, C.mark, 0.038); gm(zeb, C.mark, 0.039);
+  }
   const geo = c => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(c.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(c.nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(c.uv, 2)); return g; };
   cols.forEach((c, i) => { if (!c.pos.length) return; const m = new THREE.Mesh(geo(c), facadeMat(i, ev)); m.castShadow = m.receiveShadow = true; city.add(m); });
   const roofs = new THREE.Mesh(geo(roofCol), mat({ color: 0xbdb8b1, side: THREE.DoubleSide })); roofs.castShadow = roofs.receiveShadow = true; city.add(roofs);
-  const lawns = flat(new THREE.Mesh(geo(lawnCol), mat({ color: C.lawn, roughness: 1 })), 0.03); city.add(lawns);
+  const lawns = flat(new THREE.Mesh(geo(lawnCol), mat({ color: C.lawn, roughness: 1, side: THREE.DoubleSide })), 0.03); city.add(lawns);
   const dummy = new THREE.Object3D(), crowns = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), mat({ color: 0xa9aea4, roughness: 1 }), cityTrees.length);
   cityTrees.forEach(([x, z, h], i) => { dummy.position.set(x, h * 0.6, z); dummy.scale.setScalar(h * 0.35); dummy.updateMatrix(); crowns.setMatrixAt(i, dummy.matrix); });
   crowns.castShadow = true; city.add(crowns);
@@ -791,6 +850,7 @@ tSlider.oninput = applyLight;
 const views = {
   park:    { pos: [95, 6, 290], target: [2, 70, 8] },
   street:  { pos: [16, 1.7, S.park + 2], target: [-6, 16, R.z1] },
+  entrance: { pos: [14, 3.2, R.z0 - 20], target: [0, 4.2, R.z0] },
   territory: { pos: [0, 190, 230], target: [0, 0, -20] },
   west:    { pos: [T.x0 - 15, 32, T.z1 + 30], target: [T.x0 + 60, 2, (T.z0 + T.z1) / 2] },
   east:    { pos: [T.x1 + 15, 32, T.z1 + 30], target: [T.x1 - 60, 2, (T.z0 + T.z1) / 2] },
