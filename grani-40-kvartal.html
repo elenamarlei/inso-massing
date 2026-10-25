@@ -25,6 +25,7 @@
 <body>
 <div id="ui">
   <h1>ИНСО — грани к солнцу, вариант 2: крупные грани, подиум по улице, двор сбоку, край парка в городе</h1>
+  <div><button id="hideUi">Спрятать панель для снимка</button> <span style="color:#555;font-size:12px">вернуть — клавиша H</span></div>
   <div>
     <button data-view="park">Из парка</button>
     <button data-view="street">С тротуара у парка</button>
@@ -425,8 +426,8 @@ function buildTerritory() {
       // ---- запад: тихий ----
       const pond = blob(P([[72, 62], [78, 53], [92, 51], [108, 53], [117, 61], [113, 71], [98, 75], [82, 73]]), C.water, 0.068, { roughness: 0.05, metalness: 0.4 });
       ribbon(P([[68, 62], [76, 49.5], [92, 48], [110, 49.5], [121, 61], [116, 75], [98, 79], [79, 77]]), 2.5, K.walk, 0.064, true); // дорожка вокруг пруда
-      along(pond, 13, (x, z, nx, nz, a) => bench(x - nx * 6.5, z - nz * 6.5, a), 0.05, 0.95);
       const c = p(95, 63);
+      along(pond, 13, (x, z, nx, nz, a) => { const k = Math.hypot(x + nx - c.x, z + nz - c.y) > Math.hypot(x - c.x, z - c.y) ? 6.5 : -6.5; bench(x + nx * k, z + nz * k, a); }, 0.05, 0.95); // скамейки снаружи дорожки, лицом к воде
       for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2, e = a + Math.PI * 0.45; jetArc(c.x + Math.cos(a) * 7, c.y + Math.sin(a) * 4.5, c.x + Math.cos(e) * 7, c.y + Math.sin(e) * 4.5, 1.8, 0.07); }
       jetV(c.x, c.y, 3.5);
       feat('пруд, фонтан из арок', 95, 63, 10);
@@ -541,14 +542,15 @@ function kids(cx, cz, rx, rz, r) { // большая площадка: башн�
   boxAt(cx - rx * 0.4, cz + rz * 0.25, cx - rx * 0.4 + 3.5, cz + rz * 0.25 + 3.5, 0.35, mat({ color: K.sand }));
   for (let k = 0; k < 3; k++) cyl(cx + rx * 0.45 + k * 1.4, cz + rz * 0.45, 0.25, 0.7, M.play);
 }
-function neighbourYard(x0, z0, x1, z1, level, seed) {
+function neighbourYard(x0, z0, x1, z1, level, seed, arch) {
   let w = x1 - x0, d = z1 - z0; if (w < 20 || d < 20) return;
   let s = seed; const r = () => (s = (s * 16807) % 2147483647) / 2147483647;
   let iz0 = z0, iz1 = z1;
   // проезд вдоль корпуса с машинами у тротуара (только у ближних дворов)
-  if (level > 1 && d > 36) {
-    const north = r() < 0.5, zA = north ? z0 + 1 : z1 - 7;
-    rect(x0 + 1, zA, x1 - 1, zA + 6, C.road, 0.061); rect(x0 + 1, zA + 2.9, x1 - 1, zA + 3.1, C.mark, 0.0615);
+  if (arch || (level > 1 && d > 36)) {
+    const north = arch ? arch.side === 'n' : r() < 0.5, zA = north ? z0 + 1 : z1 - 7;
+    rect(x0 + 1, zA, x1 - 1, zA + 6, C.road, 0.061);
+    if (arch) rect(arch.ax - ARCH_W / 2 + 0.5, Math.min(arch.zOut, zA), arch.ax + ARCH_W / 2 - 0.5, Math.max(arch.zOut, zA + 6), C.road, 0.0612); // проезд через арку на улицу rect(x0 + 1, zA + 2.9, x1 - 1, zA + 3.1, C.mark, 0.0615);
     for (let x = x0 + 4; x < x1 - 6; x += 5.5) if (r() < 0.65) rotBox(x, north ? zA + 1.3 : zA + 4.7, 4.4, 1.8, 1.4, 0, CAR_MATS[Math.floor(r() * 5)], 0.1);
     if (north) iz0 = z0 + 8; else iz1 = z1 - 8;
   }
@@ -609,6 +611,10 @@ function buildGround() {
   rect(S.roadW, S.roadN, S.roadW + 12, S.roadS, C.road, 0.035);
   rect(S.roadW + 12, S.plazaN, T.x0, R.z1, C.walk, 0.045); rect(T.x1, S.plazaN, S.roadE0, R.z1, C.walk, 0.045);
   rect(S.roadE0, S.roadN, S.roadE1, S.roadS, C.road, 0.035);
+  for (const xa of [S.roadW, S.roadE0]) { // боковые улицы с той же разметкой
+    rect(xa + 0.25, S.roadN, xa + 0.35, S.roadS, C.mark, 0.061); rect(xa + 11.65, S.roadN, xa + 11.75, S.roadS, C.mark, 0.061);
+    for (let z = S.roadN + 2; z < S.roadS - 4; z += 9) rect(xa + 5.92, z, xa + 6.08, z + 3, C.mark, 0.062);
+  }
   // разметка: осевая пунктиром, линии у кромок, переходы (у парка и на северной улице там, где к входу подходят дорожки)
   const XW = [-6, -24, 24];
   for (const [zA, zB] of [[S.walkS, S.roadS], [S.roadN, S.plazaN]]) {
@@ -688,11 +694,18 @@ function pushWall(col, p1, p2, y0, y1, out, u0) {
     [out.x, 0, out.y], dot > 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]);
 }
 const pushFlat = (col, x0, z0, x1, z1, y) => pushQuad(col, [[x0, y, z0, 0, 0], [x1, y, z0, 0, 0], [x1, y, z1, 0, 0], [x0, y, z1, 0, 0]], [0, 1, 0], [0, 1, 2, 0, 2, 3]);
-function box(fi, x0, z0, x1, z1, fl, r) {
+function box(fi, x0, z0, x1, z1, fl, r, y0 = 0) {
   const pl = rectPlan(x0, z0, x1, z1), h = fl * NFLOOR;
-  for (let i = 0; i < 4; i++) { const p = pl[i], q = pl[(i + 1) % 4], d = new V2().subVectors(q, p).normalize(); pushWall(cols[fi], p, q, 0, h, new V2(-d.y, d.x), Math.floor(r() * 10) * 0.1); }
+  for (let i = 0; i < 4; i++) { const p = pl[i], q = pl[(i + 1) % 4], d = new V2().subVectors(q, p).normalize(); pushWall(cols[fi], p, q, y0, h, new V2(-d.y, d.x), Math.floor(r() * 10) * 0.1); }
   pushFlat(roofCol, x0, z0, x1, z1, h);
+  if (y0 > 0) pushFlat(roofCol, x0, z0, x1, z1, y0); // потолок арки
   return h;
+}
+// корпус с проездной аркой: проём 6 м шириной и 4,6 м высотой по центру a (вдоль длинной стороны)
+const ARCH_W = 6, ARCH_H = 4.6;
+function archBar(fi, x0, z0, x1, z1, fl, r, a) {
+  if (x1 - x0 >= z1 - z0) { bar(fi, x0, z0, a - ARCH_W / 2, z1, fl, r); bar(fi, a + ARCH_W / 2, z0, x1, z1, fl, r); box(fi, a - ARCH_W / 2, z0, a + ARCH_W / 2, z1, fl, r, ARCH_H); }
+  else { bar(fi, x0, z0, x1, a - ARCH_W / 2, fl, r); bar(fi, x0, a + ARCH_W / 2, x1, z1, fl, r); box(fi, x0, a - ARCH_W / 2, x1, a + ARCH_W / 2, fl, r, ARCH_H); }
 }
 // корпус: длинный иногда делится на секции разной высоты
 function bar(fi, x0, z0, x1, z1, fl, r) {
@@ -702,11 +715,11 @@ function bar(fi, x0, z0, x1, z1, fl, r) {
   while (a < L) {
     const b = L - a < 40 ? L : a + 25 + r() * 20, f = Math.max(3, fl + [-1, 0, 0, 1, 2][Math.floor(r() * 5)]);
     if (alongX) box(fi, x0 + a, z0, x0 + b, z1, f, r); else box(fi, x0, z0 + a, x1, z0 + b, f, r);
-    a = b;
+    a = b + (b < L - 30 && r() < 0.3 ? 8 : 0); // иногда между секциями проход 8 м — отдельные дома, а не сплошная стена
   }
 }
-function courtyard(x0, z0, x1, z1, r) {
-  pushFlat(lawnCol, x0, z0, x1, z1, 0.03); YARDS.push([x0, z0, x1, z1]);
+function courtyard(x0, z0, x1, z1, r, arch = null) {
+  pushFlat(lawnCol, x0, z0, x1, z1, 0.03); YARDS.push([x0, z0, x1, z1, arch]);
   const n = 1 + Math.floor(r() * 3); if (Math.hypot((x0 + x1) / 2, (z0 + z1) / 2) < 480) return; // ближние дворы прорисованы отдельно
   for (let i = 0; i < n; i++) cityTrees.push([x0 + 4 + r() * (x1 - x0 - 8), z0 + 4 + r() * (z1 - z0 - 8), 6 + r() * 4]);
 }
@@ -716,7 +729,12 @@ function block(x0, z0, x1, z1, fl, form, open, r, fi) {
   const Wb = (a, b) => bar(fi, x0, a, x0 + D, b, fl, r), Eb = (a, b) => bar(fi, x1 - D, a, x1, b, fl, r);
   switch (form) {
     case 'office': bar(4, x0, z0, x1, z1, fl, r); break;
-    case 'ring': N(); Sb(); Wb(z0 + D, z1 - D); Eb(z0 + D, z1 - D); courtyard(x0 + D, z0 + D, x1 - D, z1 - D, r); break;
+    case 'ring': { // замкнутый квартал: арка с проездом во двор с одной из длинных сторон и проход в углу
+      const side = r() < 0.5 ? 'n' : 's', ax = x0 + (x1 - x0) * (0.35 + r() * 0.3);
+      if (side === 'n') { archBar(fi, x0, z0, x1, z0 + D, fl, r, ax); Sb(); } else { N(); archBar(fi, x0, z1 - D, x1, z1, fl, r, ax); }
+      Wb(z0 + D, z1 - D - 9); Eb(z0 + D, z1 - D);
+      courtyard(x0 + D, z0 + D, x1 - D, z1 - D, r, { side, ax, zOut: side === 'n' ? z0 : z1 }); break;
+    }
     case 'U':
       if (open === 's') { N(); Wb(z0 + D, z1); Eb(z0 + D, z1); } else if (open === 'n') { Sb(); Wb(z0, z1 - D); Eb(z0, z1 - D); }
       else if (open === 'e') { N(); Sb(); Wb(z0 + D, z1 - D); } else { N(); Sb(); Eb(z0 + D, z1 - D); }
@@ -761,7 +779,7 @@ function buildCity() {
   }
   if (!yardGroup) { // дворы ближайших домов: строятся один раз, ближе 280 м подробно, до 480 м проще, дальше только газон и деревья
     yardGroup = new THREE.Group(); TARGET = yardGroup;
-    YARDS.forEach(([x0, z0, x1, z1], i) => { const d = Math.hypot((x0 + x1) / 2, (z0 + z1) / 2); if (d < 480) neighbourYard(x0, z0, x1, z1, d < 280 ? 2 : 1, 101 + i * 7); });
+    YARDS.forEach(([x0, z0, x1, z1, arch], i) => { const d = Math.hypot((x0 + x1) / 2, (z0 + z1) / 2); if (d < 480) neighbourYard(x0, z0, x1, z1, d < 280 ? 2 : 1, 101 + i * 7, arch); });
     const dm = new THREE.Object3D(), yc = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), mat({ color: 0xa9aea4, roughness: 1 }), YARD_TREES.length);
     YARD_TREES.forEach(([x, z, h], i) => { dm.position.set(x, h * 0.6, z); dm.scale.setScalar(h * 0.35); dm.updateMatrix(); yc.setMatrixAt(i, dm.matrix); });
     yc.castShadow = true; yardGroup.add(yc);
@@ -769,10 +787,10 @@ function buildCity() {
   }
   yardGroup.visible = opt.nb;
   { // улицы между кварталами: тротуар 3,5 м, проезжая часть 15 м, осевая пунктиром, на ближних перекрёстках переходы
-    const asph = newCol(), sidew = newCol(), dash = newCol(), zeb = newCol(), SW = 3.5;
+    const asph = newCol(), sidew = newCol(), dash = newCol(), zeb = newCol(), SW = 5; // как у улиц вокруг ИНСО: проезжая часть 12 м
     const strip = (x0, z0, x1, z1, alongZ) => {
-      if (alongZ) { pushFlat(sidew, x0, z0, x0 + SW, z1, 0.036); pushFlat(sidew, x1 - SW, z0, x1, z1, 0.036); pushFlat(asph, x0 + SW, z0, x1 - SW, z1, 0.034); const xm = (x0 + x1) / 2; for (let z = z0 + 2; z < z1 - 6; z += 8) pushFlat(dash, xm - 0.08, z, xm + 0.08, z + 3, 0.038); }
-      else { pushFlat(sidew, x0, z0, x1, z0 + SW, 0.036); pushFlat(sidew, x0, z1 - SW, x1, z1, 0.036); pushFlat(asph, x0, z0 + SW, x1, z1 - SW, 0.034); const zm = (z0 + z1) / 2; for (let x = x0 + 2; x < x1 - 6; x += 8) pushFlat(dash, x, zm - 0.08, x + 3, zm + 0.08, 0.038); }
+      if (alongZ) { pushFlat(sidew, x0, z0, x0 + SW, z1, 0.036); pushFlat(sidew, x1 - SW, z0, x1, z1, 0.036); pushFlat(asph, x0 + SW, z0, x1 - SW, z1, 0.034); pushFlat(dash, x0 + SW + 0.25, z0, x0 + SW + 0.35, z1, 0.038); pushFlat(dash, x1 - SW - 0.35, z0, x1 - SW - 0.25, z1, 0.038); const xm = (x0 + x1) / 2; for (let z = z0 + 2; z < z1 - 6; z += 8) pushFlat(dash, xm - 0.08, z, xm + 0.08, z + 3, 0.038); }
+      else { pushFlat(sidew, x0, z0, x1, z0 + SW, 0.036); pushFlat(sidew, x0, z1 - SW, x1, z1, 0.036); pushFlat(asph, x0, z0 + SW, x1, z1 - SW, 0.034); pushFlat(dash, x0, z0 + SW + 0.25, x1, z0 + SW + 0.35, 0.038); pushFlat(dash, x0, z1 - SW - 0.35, x1, z1 - SW - 0.25, 0.038); const zm = (z0 + z1) / 2; for (let x = x0 + 2; x < x1 - 6; x += 8) pushFlat(dash, x, zm - 0.08, x + 3, zm + 0.08, 0.038); }
     };
     for (let zz = S.city - 30 + 22 * (BD + ST); zz > -2300; zz -= BD + ST) for (let x0 = -2300; x0 < 2300; x0 += BW + ST) {
       const x1 = x0 + BW, z1 = zz, z0 = zz - BD;
@@ -834,6 +852,8 @@ function applyLight() {
 }
 
 // ---- Управление ----
+document.getElementById('hideUi').onclick = () => document.body.classList.add('clean');
+addEventListener('keydown', e => { if (e.key === 'h' || e.key === 'H' || e.key === 'р' || e.key === 'Р') document.body.classList.toggle('clean'); });
 const dateSel = document.getElementById('date');
 for (const [k, v] of Object.entries(DATES)) dateSel.add(new Option(v.name, k));
 dateSel.value = opt.date;
