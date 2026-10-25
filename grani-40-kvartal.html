@@ -389,6 +389,21 @@ function playground(cx, cz, rx, rz, big, s) { // мягкое покрытие �
 }
 const grove = (cx, cz, r, n) => { for (let k = 0; k < n; k++) { const a = rnd2() * Math.PI * 2, d = Math.sqrt(rnd2()) * r; tree(cx + Math.cos(a) * d, cz + Math.sin(a) * d * 0.8, 7 + rnd2() * 5); } };
 
+// вечерний свет: фонари на опорах с тёплым светом, пятна света на земле; включаются вместе с режимом «Вечер»
+const nightGroup = new THREE.Group(); nightGroup.visible = false; scene.add(nightGroup);
+const LAMP = { post: mat({ color: 0x3b3f44, metalness: 0.4, roughness: 0.5 }), head: new THREE.MeshStandardMaterial({ color: 0xf6ead6, emissive: 0xffc27a, emissiveIntensity: 0 }) };
+const GLOW = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,200,130,0.85)'); gr.addColorStop(0.45, 'rgba(255,180,100,0.35)'); gr.addColorStop(1, 'rgba(255,170,90,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  return new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }); })();
+function glow(x, z, r, y = 0.09) { const m = new THREE.Mesh(new THREE.PlaneGeometry(2 * r, 2 * r), GLOW); m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); m.renderOrder = -800; nightGroup.add(m); }
+function lamp(x, z, h = 4, r = 7) { // парковый фонарь: тонкая опора и светящийся плафон
+  boxAt(x - 0.06, z - 0.06, x + 0.06, z + 0.06, h, LAMP.post);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.3, 0.4, 10), LAMP.head); m.position.set(x, h + 0.2, z); TARGET.add(m);
+  glow(x, z, r);
+}
+const bollard = (x, z) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.9, 8), LAMP.head); m.position.set(x, 0.45, z); TARGET.add(m); glow(x, z, 2.5); }; // столбик-светильник у дорожки
+function mast(x, z) { boxAt(x - 0.12, z - 0.12, x + 0.12, z + 0.12, 9, LAMP.post); const m = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 0.6), LAMP.head); m.position.set(x, 9.1, z); TARGET.add(m); }
+const lampsAlong = (curve, step, off, h, r) => along(curve, step, (x, z, nx, nz) => lamp(x + nx * off, z + nz * off, h, r));
 function buildTerritory() {
   const Wd = R.x0 - T.x0, D = T.z1 - T.z0;
   for (const side of [-1, 1]) {
@@ -401,25 +416,29 @@ function buildTerritory() {
     r(0, 0, Wd, D, C.yard, 0.05);
     r(0, 0, 10, D, K.prom, 0.06); // каменная терраса вдоль подиума, выходы из лобби и коворкинга/ресторана
     // ограда и изгородь с калитками: на север (улица), на юг (тротуар у парка) и сбоку (боковая улица)
-    const gateN = [68, 76], gateS = [[10, 16], [50, 58]], gateW = [40, 48];
+    const gateN = [68, 76], gateS = [[3, 9], [50, 58]], gateW = [40, 48]; // калитка у подиума — прямо с каменной террасы
     for (const [u0, u1] of [[10, gateN[0]], [gateN[1], Wd]]) { b(u0, 0, u1, 0.06, 1.6, M.fence); b(u0, 1.2, u1, 2.2, 1.2, hedgeMat); }
     for (const [u0, u1] of [[0, gateS[0][0]], [gateS[0][1], gateS[1][0]], [gateS[1][1], Wd]]) { b(u0, D - 0.06, u1, D, 1.6, M.fence); b(u0, D - 2.2, u1, D - 1.2, 1.2, hedgeMat); }
     for (const [v0, v1] of [[0, gateW[0]], [gateW[1], D]]) { b(Wd - 0.06, v0, Wd, v1, 1.6, M.fence); b(Wd - 2.2, v0, Wd - 1.2, v1, 1.2, hedgeMat); }
 
     // беговая петля 3 м с разметкой по центру
-    const track = ribbon(P([[18, 44], [19, 24], [30, 10], [60, 8], [95, 10], [122, 7], [134, 22], [135, 48], [132, 70], [116, 81], [82, 80], [48, 82], [26, 74]]), 3, K.track, 0.07, true);
-    ribbon(P([[18, 44], [19, 24], [30, 10], [60, 8], [95, 10], [122, 7], [134, 22], [135, 48], [132, 70], [116, 81], [82, 80], [48, 82], [26, 74]]), 0.15, K.trackLine, 0.075, true);
+    // беговая петля идёт вдоль ограды, внутри остаются все площадки; у подиума — за каменной террасой
+    const TR = [[13, 44], [13, 16], [20, 6], [60, 5], [100, 5], [127, 6], [134, 15], [135, 44], [134, 73], [127, 82], [90, 83], [50, 83], [20, 82], [13, 73]];
+    const track = ribbon(P(TR), 3, K.track, 0.07, true);
+    ribbon(P(TR), 0.15, K.trackLine, 0.075, true);
     TRACK_LEN = track.getLength();
     // бульвар: от выхода из лобби через всё крыло к боковой калитке; деревья в два ряда, скамейки в тени
     const prom = ribbon(P([[8, 44], [30, 40], [52, 46], [72, 42], [96, 47], [118, 42], [Wd + 1, 44]]), 4.5, K.prom, 0.066);
     along(prom, 10, (x, z, nx, nz) => { tree(x + nx * 5, z + nz * 5, 8 + rnd2() * 2); tree(x - nx * 5, z - nz * 5, 8 + rnd2() * 2); }, 0.06, 0.94);
     along(prom, 15, (x, z, nx, nz, a) => { bench(x + nx * 3.2, z + nz * 3.2, a); bench(x - nx * 3.2, z - nz * 3.2, a); }, 0.08, 0.92);
     // прогулочные дорожки к северной и южной калиткам
-    ribbon(P([[72, 42], [66, 28], [74, 12], [72, -1]]), 3, K.walk, 0.065);
-    ribbon(P([[52, 46], [58, 62], [50, 76], [54, 89]]), 3, K.walk, 0.065);
-    ribbon(P([[13, 60], [13, 89]]), 3, K.walk, 0.065); // от террасы к калитке у подиума
-    for (const [u, v] of [[72, 8], [54, 81], [136, 44], [21, 44]]) { const q = p(u, v); rect(q.x - 1.6, q.y - 1.6, q.x + 1.6, q.y + 1.6, K.trackLine, 0.078); } // переходы через беговую
-    feat(`беговая петля ${Math.round(TRACK_LEN)} м`, 60, 8, 5);
+    lampsAlong(prom, 18, 2.8, 4.2, 8);
+    along(track, 22, (x, z, nx, nz) => bollard(x - nx * 2.2, z - nz * 2.2));
+    const pathN = ribbon(P([[72, 42], [66, 28], [74, 12], [72, -1]]), 3, K.walk, 0.065);
+    const pathS = ribbon(P([[52, 46], [58, 62], [50, 76], [54, 89]]), 3, K.walk, 0.065);
+    lampsAlong(pathN, 16, 2.2, 3.6, 6); lampsAlong(pathS, 16, 2.2, 3.6, 6);
+    for (const [u, v] of [[72, 5], [53, 83], [135, 44], [13, 44]]) { const q = p(u, v); rect(q.x - 1.6, q.y - 1.6, q.x + 1.6, q.y + 1.6, K.trackLine, 0.078); } // переходы через беговую
+    feat(`беговая петля ${Math.round(TRACK_LEN)} м`, 60, 5, 5);
     feat('бульвар', 40, 41, 6);
 
     if (side < 0) {
@@ -430,6 +449,8 @@ function buildTerritory() {
       along(pond, 13, (x, z, nx, nz, a) => { const k = Math.hypot(x + nx - c.x, z + nz - c.y) > Math.hypot(x - c.x, z - c.y) ? 6.5 : -6.5; bench(x + nx * k, z + nz * k, a); }, 0.05, 0.95); // скамейки снаружи дорожки, лицом к воде
       for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2, e = a + Math.PI * 0.45; jetArc(c.x + Math.cos(a) * 7, c.y + Math.sin(a) * 4.5, c.x + Math.cos(e) * 7, c.y + Math.sin(e) * 4.5, 1.8, 0.07); }
       jetV(c.x, c.y, 3.5);
+      along(pond, 14, (x, z, nx, nz) => { const k = Math.hypot(x + nx - c.x, z + nz - c.y) > Math.hypot(x - c.x, z - c.y) ? 8.5 : -8.5; lamp(x + nx * k, z + nz * k, 3.6, 6); });
+      glow(c.x, c.y, 11, 0.1); glow(c.x, c.y, 5, 0.11); // фонтан подсвечен из воды
       feat('пруд, фонтан из арок', 95, 63, 10);
       b(86, 49, 94, 58, 0.45, M.wood); for (let k = 0; k < 3; k++) b(87 + k * 2.4, 54, 88.4 + k * 2.4, 56.4, 0.35, benchMat, 0.45);
       feat('настил с лежаками', 90, 54, 5);
@@ -446,7 +467,7 @@ function buildTerritory() {
       for (let k = 0; k < 7; k++) { const a = k / 7 * Math.PI * 2; boxAt(m.x + Math.cos(a) * 4 - 1.2, m.y + Math.sin(a) * 3.5 - 1, m.x + Math.cos(a) * 4 + 1.2, m.y + Math.sin(a) * 3.5 + 1, 0.9, M.mist); }
       ribbon(P([[63, 25], [67, 25]]), 2.5, K.walk, 0.065); feat('туманный сад', 56, 24, 5);
       // площадка для малышей у террасы подиума: видно из лобби
-      playground(...Object.values(p(26, 24)), 9, 8, false, 1); const pg = p(26, 35); pergola(pg.x, pg.y, 7, 3.5);
+      playground(...Object.values(p(26, 24)), 9, 8, false, 1); for (const [u, v] of [[16, 14], [36, 14], [16, 34], [36, 34]]) { const q = p(u, v); lamp(q.x, q.y, 4.5, 9); } const pg = p(26, 35); pergola(pg.x, pg.y, 7, 3.5);
       feat('площадка для малышей', 26, 24, 6);
     } else {
       // ---- восток: активный ----
@@ -454,6 +475,7 @@ function buildTerritory() {
       feat('прыгающие струи над бульваром', 85, 45, 7);
       // спорт у северной улицы (шум к улице, а не к окнам)
       r(96, 12, 128, 30, K.court, 0.075);
+      for (const [u, v] of [[95, 11], [129, 11], [95, 31], [129, 31]]) { const q = p(u, v); mast(q.x, q.y); } { const q = p(112, 21); glow(q.x, q.y, 20, 0.1); } // мачты над спортплощадкой
       for (const [u0, v0, u1, v1] of [[96.3, 12.3, 127.7, 12.5], [96.3, 29.5, 127.7, 29.7], [96.3, 12.3, 96.5, 29.7], [127.5, 12.3, 127.7, 29.7], [111.9, 12.3, 112.1, 29.7]]) r(u0, v0, u1, v1, C.mark, 0.08);
       for (const [u0, v0, u1, v1] of [[96, 12, 128, 12.05], [96, 29.95, 128, 30], [96, 12, 96.05, 30], [127.95, 12, 128, 30]]) b(u0, v0, u1, v1, 3, M.net);
       feat('спортплощадка', 112, 21, 7);
@@ -466,9 +488,9 @@ function buildTerritory() {
       for (let k = 0; k < 5; k++) { const q = p(26 + k * 5, 24 + (k % 2) * 3); rotBox(q.x, q.y, 0.7, 1.9, 0.35, 0.3, benchMat); }
       feat('лужайка с шезлонгами', 36, 24, 5);
       // детские площадки к югу от бульвара: семейная у террасы, большая дальше
-      playground(...Object.values(p(26, 64)), 10, 9, false, 2); const pf = p(26, 76); pergola(pf.x, pf.y, 8, 3.5);
+      playground(...Object.values(p(26, 64)), 10, 9, false, 2); for (const [u, v] of [[18, 54], [36, 54], [38, 72]]) { const q = p(u, v); lamp(q.x, q.y, 4.5, 9); } const pf = p(26, 76); pergola(pf.x, pf.y, 8, 3.5);
       feat('семейная площадка', 26, 64, 6);
-      playground(...Object.values(p(74, 64)), 13, 11, true, 4); const pb = p(74, 77.5); pergola(pb.x, pb.y, 8, 3);
+      playground(...Object.values(p(74, 64)), 13, 11, true, 4); for (const [u, v] of [[60, 54], [88, 54], [60, 74], [88, 74]]) { const q = p(u, v); lamp(q.x, q.y, 5, 10); } const pb = p(74, 77.5); pergola(pb.x, pb.y, 8, 3);
       feat('большая детская площадка', 74, 64, 8);
       // яблоневый сад со скошенной дорожкой
       for (let u = 94; u <= 112; u += 6) for (let v = 54; v <= 76; v += 6) { const q = p(u + (v % 12 ? 3 : 0), v); tree(q.x, q.y, 5 + rnd2()); }
@@ -486,6 +508,7 @@ function buildTerritory() {
   ellipse(0, cz, 20, 15, C.road, 0.05); ellipse(0, cz, 14, 9.5, K.prom, 0.055); ellipse(0, cz, 9, 6, C.water, 0.06, { roughness: 0.05, metalness: 0.4 });
   for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; jetArc(Math.cos(a) * 8.5, cz + Math.sin(a) * 5.6, Math.cos(a) * 2, cz + Math.sin(a) * 1.3, 1.4, 0.06); }
   FEATURES.push(['фонтан-корона, подъезд с высадкой', 0, 8, cz]);
+  glow(0, cz, 9, 0.1); for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; lamp(Math.cos(a) * 23, cz + Math.sin(a) * 17.5, 4.5, 8); }
   rect(-12, cz + 8, 12, R.z0, K.prom, 0.056);   // каменная площадка перед главным входом, на ширину портала с запасом
   // пешеходные дорожки от северного тротуара вокруг овала к входу: слева и справа, асфальт подъезда обходят
   for (const sd of [-1, 1]) ribbon([new V2(sd * 24, S.plazaN), new V2(sd * 22, cz - 6), new V2(sd * 20, cz + 8), new V2(sd * 9, R.z0 - 6), new V2(sd * 4, R.z0 - 1)], 3.5, K.prom, 0.057);
@@ -624,6 +647,8 @@ function buildGround() {
   }
   zebra(-6, S.walkS, S.roadS, true); zebra(-24, S.roadN, S.plazaN, false); zebra(24, S.roadN, S.plazaN, false);
 
+  // уличные фонари вдоль улицы у парка и северной улицы: опоры 8 м через 30 м
+  for (let x = -690; x < 700; x += 30) { lamp(x + 4.5, S.walkS - 0.6, 8, 11); lamp(x + 19.5, S.roadS + 0.6, 8, 11); lamp(x + 4.5, S.roadN - 0.6, 8, 11); lamp(x + 19.5, S.plazaN + 0.6, 8, 11); }
   // тротуар перед подиумом: небольшие деревья через 9 м, между ними кусты
   for (let x = -700; x < 700; x += 9) {
     if (x > -10 && x < 6) continue;                                       // у перехода просвет
@@ -638,6 +663,8 @@ function buildGround() {
   const pond = new THREE.Mesh(new THREE.CircleGeometry(1, 48), mat({ color: C.water, roughness: 0.05, metalness: 0.4 }));
   pond.rotation.x = -Math.PI / 2; pond.scale.set(70, 38, 1); pond.position.set(-140, 0.03, 300); flat(pond, 0.03); scene.add(pond);
   rect(-8, S.park, -4, 200, C.stone, 0.03);
+  for (let z = S.park + 8; z < 200; z += 18) lamp(-9.5, z, 4.2, 8); // фонари в парке вдоль дорожки от перехода
+  for (let k = 0; k < 40; k++) { const a = k / 40 * Math.PI * 2; lamp(-140 + Math.cos(a) * 78, 300 + Math.sin(a) * 44, 4, 7); } // и вокруг паркового пруда
   for (let i = 0; i < 1100; i++) {
     const x = (rnd2() - 0.5) * 1400, z = S.park + 6 + rnd2() * 600;
     if (((x + 140) / 80) ** 2 + ((z - 300) / 46) ** 2 < 1) continue;     // пруд
@@ -849,6 +876,7 @@ function applyLight() {
     else { dir = new THREE.Vector3(-0.6, 0.55, 0.58); sun.intensity = 1.5; hemi.intensity = 0.95; }
   }
   sun.position.copy(dir.normalize().multiplyScalar(600)); sun.target.position.set(0, 0, 0);
+  nightGroup.visible = opt.evening; LAMP.head.emissiveIntensity = opt.evening ? 1.6 : 0;
 }
 
 // ---- Управление ----
