@@ -28,7 +28,9 @@
   <div>
     <button data-view="park">Из парка</button>
     <button data-view="street">С тротуара у парка</button>
-    <button data-view="yard">Двор</button>
+    <button data-view="territory">Территория</button>
+    <button data-view="west">Запад: пруд</button>
+    <button data-view="east">Восток: спорт</button>
     <button data-view="corner">Срезанный угол</button>
     <button data-view="crown">Верх</button>
     <button data-view="far">Издалека</button>
@@ -42,7 +44,6 @@
   <label><input type="checkbox" id="ends"> Торцы тоже гранями</label>
   <label><input type="checkbox" id="street"> Подиум по улице, башня повёрнута на нём</label>
   <label><input type="checkbox" id="nb"> Город вокруг</label>
-  <label>Город позади: <select id="city"><option value="low">невысокий, 3–9 эт.</option><option value="high">с высокими домами до 25 эт.</option></select></label>
   <label><input type="checkbox" id="labels"> Этажность</label>
   <label><input type="checkbox" id="evening"> Вечер: подсветка верха, подиум, горящие окна</label>
   <label><input type="checkbox" id="sun"> Солнце (55° с. ш.) <select id="date"></select></label>
@@ -73,7 +74,7 @@ const flag = (k, d) => params.has(k) ? params.get(k) === '1' : d;
 const opt = {
   fold: +(params.get('fold') ?? 6), cw: +(params.get('cw') ?? 2), ch: +(params.get('ch') ?? 5),
   ends: flag('ends', true), street: flag('street', true), nb: flag('nb', true), labels: flag('labels', false),
-  evening: flag('evening', false), sun: flag('sun', false), date: params.get('date') || 'nov', city: params.get('city') === 'high' ? 'high' : 'low',
+  evening: flag('evening', false), sun: flag('sun', false), date: params.get('date') || 'nov',
 };
 
 // ---- План башни: параллелограмм, торцы по линии север–юг, острые углы срезаны ----
@@ -97,13 +98,14 @@ const WALLS = [ // [от, до, нормаль, тип] по индексам т
 ];
 // Подиум по улице: прямоугольник по сетке улиц вокруг повёрнутой башни (к парку 9 м, по бокам 5 м, к северу 2 м)
 const R = (() => { const xs = PLAN.map(p => p.x), zs = PLAN.map(p => p.y); return { x0: Math.min(...xs) - 5, x1: Math.max(...xs) + 5, z0: Math.min(...zs) - 2, z1: Math.max(...zs) + 9 }; })();
-// Участок: с юга подиум → тротуар с деревьями и кустами → дорога → парк; с запада двор; с севера вход, улица, город
+// Территория дома: по 120 м по бокам от подиума, к северу до улицы (≈ 2,1 га); посередине парадный двор у входа
+const T = { x0: R.x0 - 120, x1: R.x1 + 120, z0: R.z0 - 46, z1: R.z1 };
+// Участок: с юга подиум → тротуар с деревьями и кустами → дорога → парк; с севера вход, улица, город; по бокам улицы за территорией
 const S = {};
 S.walkS = R.z1 + 10; S.roadS = S.walkS + 12; S.park = S.roadS + 5;
-S.plazaN = R.z0 - 8; S.roadN = S.plazaN - 12; S.walkN = S.roadN - 6; S.city = S.walkN - 25;
-S.yard0 = R.x0 - 60; S.roadW = S.yard0 - 12; S.cityW = S.roadW - 6;
-S.roadE0 = R.x1 + 6; S.roadE1 = S.roadE0 + 12; S.cityE = R.x1 + 55;
-const Y = { x0: S.yard0, x1: R.x0, z0: S.plazaN + 4, z1: R.z1 };
+S.plazaN = T.z0 - 4; S.roadN = S.plazaN - 12; S.walkN = S.roadN - 6; S.city = S.walkN - 25;
+S.roadW = T.x0 - 12; S.cityW = S.roadW - 6;
+S.roadE0 = T.x1; S.roadE1 = S.roadE0 + 12; S.cityE = S.roadE1 + 6;
 
 // ---- Рендер ----
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, logarithmicDepthBuffer: true });
@@ -222,10 +224,11 @@ function offsetPlan(pl, d) {
   return pl.map((_, i) => { const l1 = L[(i + pl.length - 1) % pl.length], l2 = L[i]; const t = ((l2.p.x - l1.p.x) * l2.dir.y - (l2.p.y - l1.p.y) * l2.dir.x) / (l1.dir.x * l2.dir.y - l1.dir.y * l2.dir.x); return new V2(l1.p.x + l1.dir.x * t, l1.p.y + l1.dir.y * t); });
 }
 const rectPlan = (x0, z0, x1, z1) => [new V2(x0, z1), new V2(x1, z1), new V2(x1, z0), new V2(x0, z0)]; // обход как у плана башни
-function label(text, x, y, z, parent) {
-  const c = document.createElement('canvas'); c.width = 320; c.height = 96; const g = c.getContext('2d');
-  g.fillStyle = 'rgba(255,255,255,.85)'; g.fillRect(0, 0, 320, 96); g.fillStyle = '#2b3a4a'; g.font = 'bold 46px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 160, 50);
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: toTex(c), depthTest: false })); s.scale.set(26, 7.8, 1); s.position.set(x, y, z); s.renderOrder = 10; parent.add(s);
+function label(text, x, y, z, parent, size = 7.8) {
+  const c = document.createElement('canvas'), g = c.getContext('2d'), font = 'bold 46px system-ui, sans-serif';
+  g.font = font; c.width = Math.ceil(g.measureText(text).width) + 40; c.height = 96;
+  g.fillStyle = 'rgba(255,255,255,.85)'; g.fillRect(0, 0, c.width, 96); g.fillStyle = '#2b3a4a'; g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, c.width / 2, 50);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: toTex(c), depthTest: false, depthWrite: false })); s.scale.set(size * c.width / 96, size, 1); s.position.set(x, y, z); s.renderOrder = 10; parent.add(s);
 }
 
 // ---- Башня и подиум ----
@@ -282,17 +285,19 @@ function build() {
     `Грань ≈ ${opt.cw} окна × ${opt.ch} этажей, вынос ${f1(opt.fold)} м. <b>Грани южного фасада смотрят от ${az(A.azMin)} до ${az(A.azMax)} от юга</b> (правило — в пределах ±30°), стекло наклонено до ${Math.round(A.tilt)}°. ` +
     (opt.ends ? `Торцы сложены гранями (вынос ${f1(opt.fold * 0.6)} м), окна в южной части торца. ` : '') +
     (opt.street ? `Подиум ${Math.round(R.x1 - R.x0)} × ${Math.round(R.z1 - R.z0)} м по сетке улиц, башня повёрнута на нём на 20°. ` : 'Подиум повторяет башню. ') +
-    `Двор ${Math.round(Y.x1 - Y.x0)} × ${Math.round(Y.z1 - Y.z0)} м к западу от подиума. С юга: тротуар 10 м с деревьями и кустами, дорога 12 м, парк. С севера: вход, улица, офисы 5–7 эт. в ≈ ${Math.round(Math.min(...PLAN.map(p => p.y)) - S.city)} м, дальше город до горизонта: ${opt.city === 'high' ? 'кварталы 3–9 эт. и несколько групп башен 14–25 эт. (до ≈ 78 м)' : 'только невысокие кварталы 3–9 эт.'}`;
+    `Территория ≈ ${((T.x1 - T.x0 - (R.x1 - R.x0)) * (T.z1 - T.z0) / 10000).toFixed(1).replace('.', ',')} га: два крыла по ${Math.round(R.x0 - T.x0)} × ${Math.round(T.z1 - T.z0)} м по бокам от подиума и парадный двор у входа. Запад — пруд с фонтаном, беседка, аллея, туманный сад, площадка для малышей; восток — спортплощадка, воркаут, две детские площадки, яблоневый сад, площадка для собак; вокруг беговые дорожки. С юга: тротуар 10 м с деревьями и кустами, дорога 12 м, парк. С севера: вход, улица, офисы 5–7 эт. в ≈ ${Math.round(Math.min(...PLAN.map(p => p.y)) - S.city)} м, дальше город до горизонта: кварталы 3–9 эт. и несколько групп башен 14–25 эт. (до ≈ 78 м).`;
   document.getElementById('foldLabel').textContent = `${f1(opt.fold)} м`;
   document.getElementById('cwLabel').textContent = `${opt.cw} окна (${f1(opt.cw * MODULE)} м)`;
   document.getElementById('chLabel').textContent = `${opt.ch} этажей`;
   applyLight();
 }
 
-// ---- Земля, улицы, двор, парк (строятся один раз) ----
+// ---- Земля, улицы, территория, парк (строятся один раз) ----
+// плоские слои земли не пишут глубину и рисуются раньше всего, снизу вверх по высоте слоя: так они не тонут друг в друге издалека
+const flat = (m, y) => { m.material.depthWrite = false; m.renderOrder = -1000 + Math.round(y * 1000); m.receiveShadow = true; return m; };
 function rect(x0, z0, x1, z1, color, y, extra = {}) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(Math.abs(x1 - x0), Math.abs(z1 - z0)), mat({ color, roughness: 1, ...extra }));
-  m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); m.receiveShadow = true; scene.add(m); return m;
+  m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); flat(m, y); scene.add(m); return m;
 }
 const C = { city: 0xc4c5c2, road: 0xa6a8a8, walk: 0xd9d4cb, lawn: 0xbcc5b6, yard: 0xc3ccb9, stone: 0xe8e1d4, trav: 0xddd0b8, water: 0x9fb3bd, play: 0xd4c2a8, mark: 0xf2f2ee };
 const hedgeMat = mat({ color: 0x9fa897, roughness: 1 }), benchMat = mat({ color: 0xc9b89c });
@@ -303,6 +308,137 @@ function boxAt(x0, z0, x1, z1, h, material, y = 0) {
 const trees = [];
 const tree = (x, z, h) => trees.push([x, z, h]);
 let s2 = 7; const rnd2 = () => (s2 = (s2 * 16807) % 2147483647) / 2147483647;
+// ---- Территория дома: два крыла по бокам от подиума (по 120 × 88 м) и парадный двор у входа ----
+// Запад — тихий: пруд с фонтаном из арок и настилом, беседка, тенистая аллея, туманный сад, площадка для малышей.
+// Восток — активный: спортплощадка, воркаут, большая детская площадка, яблоневый сад, семейная площадка, прыгающие струи, площадка для собак.
+// Вокруг каждого крыла беговая дорожка, крылья связаны дорожкой вдоль парадного двора.
+const FEATURES = []; // подписи для «Этажности»
+const M = {
+  track: mat({ color: 0xb9907b, roughness: 1 }), court: mat({ color: 0x93a59b, roughness: 1 }), wood: mat({ color: 0xc4a27e }),
+  play: mat({ color: 0xc7ae8f }), post: mat({ color: 0x8b8680 }), roof: mat({ color: 0xefe9de }),
+  jet: new THREE.MeshStandardMaterial({ color: 0xeef6f9, transparent: true, opacity: 0.75, roughness: 0.1 }),
+  mist: new THREE.MeshStandardMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false }),
+  net: new THREE.MeshStandardMaterial({ color: 0x6f7378, transparent: true, opacity: 0.25, side: THREE.DoubleSide }),
+};
+function ellipse(cx, cz, rx, rz, color, y, extra = {}) {
+  const m = new THREE.Mesh(new THREE.CircleGeometry(1, 64), mat({ color, roughness: 1, ...extra }));
+  m.rotation.x = -Math.PI / 2; m.scale.set(rx, rz, 1); m.position.set(cx, y, cz); flat(m, y); scene.add(m); return m;
+}
+function ringPath(cx, cz, rx, rz, w, color, y) {
+  const m = new THREE.Mesh(new THREE.RingGeometry(1, 1 + w / rx, 64), mat({ color, roughness: 1 }));
+  m.rotation.x = -Math.PI / 2; m.scale.set(rx, rz, 1); m.position.set(cx, y, cz); flat(m, y); scene.add(m);
+}
+function loopTrack(x0, z0, x1, z1, w) { // беговая дорожка по контуру
+  rect(x0, z0, x1, z0 + w, 0xb9907b, 0.07); rect(x0, z1 - w, x1, z1, 0xb9907b, 0.07);
+  rect(x0, z0, x0 + w, z1, 0xb9907b, 0.071); rect(x1 - w, z0, x1, z1, 0xb9907b, 0.071);
+}
+const jetV = (x, z, h) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.12, h, 6), M.jet); m.position.set(x, h / 2, z); scene.add(m); };
+function jetArc(x0, z0, x1, z1, h, y = 0) {
+  const c = new THREE.QuadraticBezierCurve3(new THREE.Vector3(x0, y, z0), new THREE.Vector3((x0 + x1) / 2, y + h * 2, (z0 + z1) / 2), new THREE.Vector3(x1, y, z1));
+  scene.add(new THREE.Mesh(new THREE.TubeGeometry(c, 24, 0.07, 5), M.jet));
+}
+const bench = (x, z, alongX = true) => alongX ? boxAt(x - 0.9, z - 0.25, x + 0.9, z + 0.25, 0.45, benchMat) : boxAt(x - 0.25, z - 0.9, x + 0.25, z + 0.9, 0.45, benchMat);
+function pergola(x0, z0, x1, z1, h = 2.8) { // навес-перголa: тень для взрослых у площадок
+  for (const [x, z] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1]]) boxAt(x - 0.12, z - 0.12, x + 0.12, z + 0.12, h, M.post);
+  for (let x = x0; x <= x1; x += 0.6) boxAt(x - 0.05, z0, x + 0.05, z1, 0.15, M.wood, h);
+}
+function playset(x0, z0, x1, z1, big) { // площадка: мягкое покрытие, башенки, горка, качели
+  rect(x0, z0, x1, z1, C.play, 0.075);
+  const w = x1 - x0, d = z1 - z0;
+  boxAt(x0 + w * 0.15, z0 + d * 0.2, x0 + w * 0.15 + 3, z0 + d * 0.2 + 3, big ? 3.5 : 1.8, M.play);
+  if (big) { boxAt(x0 + w * 0.55, z0 + d * 0.25, x0 + w * 0.55 + 3, z0 + d * 0.25 + 3, 4.5, M.play); const n = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.3, 3.5), M.net); n.position.set(x0 + w * 0.42, 2.2, z0 + d * 0.3); scene.add(n); }
+  const s = new THREE.Mesh(new THREE.BoxGeometry(1, 0.1, 4.5), M.wood); s.position.set(x0 + w * 0.15 + 1.5, (big ? 3.5 : 1.8) / 2, z0 + d * 0.2 + 5); s.rotation.x = big ? 0.75 : 0.4; s.castShadow = true; scene.add(s);
+  const sx = x0 + w * 0.6, sz = z0 + d * 0.75; // качели
+  boxAt(sx - 0.1, sz - 0.1, sx + 0.1, sz + 0.1, 2.4, M.post); boxAt(sx + 4.9, sz - 0.1, sx + 5.1, sz + 0.1, 2.4, M.post); boxAt(sx, sz - 0.08, sx + 5, sz + 0.08, 0.16, M.post, 2.3);
+}
+function buildTerritory() {
+  const z0 = T.z0, z1 = T.z1, W = { x0: T.x0, x1: R.x0 }, E = { x0: R.x1, x1: T.x1 };
+  const w = (u, v) => [W.x0 + u, z0 + v], e = (u, v) => [E.x0 + u, z0 + v];
+  const rW = (u0, v0, u1, v1, c, y, x) => rect(W.x0 + u0, z0 + v0, W.x0 + u1, z0 + v1, c, y, x), rE = (u0, v0, u1, v1, c, y, x) => rect(E.x0 + u0, z0 + v0, E.x0 + u1, z0 + v1, c, y, x);
+  const bW = (u0, v0, u1, v1, h, m, y) => boxAt(W.x0 + u0, z0 + v0, W.x0 + u1, z0 + v1, h, m, y), bE = (u0, v0, u1, v1, h, m, y) => boxAt(E.x0 + u0, z0 + v0, E.x0 + u1, z0 + v1, h, m, y);
+  const tW = (u, v, h) => tree(W.x0 + u, z0 + v, h), tE = (u, v, h) => tree(E.x0 + u, z0 + v, h);
+  const feat = (text, [x, z], y = 9) => FEATURES.push([text, x, y, z]);
+  const D = z1 - z0;
+
+  // газон, светлый камень у выходов из подиума, ограда-изгородь с калитками
+  rect(W.x0, z0, W.x1, z1, C.yard, 0.05); rect(E.x0, z0, E.x1, z1, C.yard, 0.05);
+  rW(112, 0, 120, D, C.stone, 0.06); rE(0, 0, 8, D, C.stone, 0.06);
+  for (const [a, b] of [[W.x0, W.x1], [E.x0, E.x1]]) {
+    boxAt(a, z0, a + (b - a) * 0.45, z0 + 1, 1.4, hedgeMat); boxAt(a + (b - a) * 0.55, z0, b, z0 + 1, 1.4, hedgeMat);
+    boxAt(a, z1 - 1, a + (b - a) * 0.45, z1, 1.4, hedgeMat); boxAt(a + (b - a) * 0.55, z1 - 1, b, z1, 1.4, hedgeMat);
+  }
+  boxAt(W.x0, z0, W.x0 + 1, z0 + D * 0.45, 1.4, hedgeMat); boxAt(W.x0, z0 + D * 0.55, W.x0 + 1, z1, 1.4, hedgeMat);
+  boxAt(E.x1 - 1, z0, E.x1, z0 + D * 0.45, 1.4, hedgeMat); boxAt(E.x1 - 1, z0 + D * 0.55, E.x1, z1, 1.4, hedgeMat);
+
+  // беговые дорожки: петля в каждом крыле и перемычка вдоль парадного двора
+  loopTrack(W.x0 + 3, z0 + 3, W.x1 - 10, z1 - 3, 2.5); loopTrack(E.x0 + 10, z0 + 3, E.x1 - 3, z1 - 3, 2.5);
+  rect(W.x1 - 10, z0 + 3, E.x0 + 10, z0 + 5.5, 0xb9907b, 0.072);
+  feat('беговая дорожка 2 × 380 м', w(60, 4.5), 5);
+
+  // ---- запад ----
+  rW(6, 12.5, 108, 15.5, C.stone, 0.065); // тенистая аллея
+  for (let u = 8; u < 108; u += 9) { tW(u, 10, 8 + rnd2() * 2); tW(u + 4.5, 18, 8 + rnd2() * 2); }
+  for (let u = 12; u < 106; u += 12) { bench(...w(u, 12), true); bench(...w(u + 6, 16), true); }
+  feat('тенистая аллея', w(55, 14));
+  const [pcx, pcz] = w(48, 55);
+  ringPath(pcx, pcz, 33, 20, 2.6, C.stone, 0.062);
+  ellipse(pcx, pcz, 30, 17, C.water, 0.066, { roughness: 0.05, metalness: 0.4 });
+  for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2, b = a + Math.PI * 0.45; jetArc(pcx + Math.cos(a) * 8, pcz + Math.sin(a) * 5, pcx + Math.cos(b) * 8, pcz + Math.sin(b) * 5, 1.8, 0.07); }
+  jetV(pcx, pcz, 3.5);
+  feat('пруд, фонтан из арок', [pcx, pcz], 10);
+  bW(72, 52, 84, 60, 0.45, M.wood); // настил над водой, лежаки
+  for (let k = 0; k < 3; k++) bW(75 + k * 3, 53, 76.6 + k * 3, 55.2, 0.35, benchMat, 0.45);
+  feat('настил с лежаками', w(80, 56), 6);
+  rW(84, 54.5, 112, 57.5, C.stone, 0.065); // дорожка от лобби к настилу
+  rW(46.5, 18, 49.5, 35, C.stone, 0.065); // от аллеи к беседке и пруду
+  for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2 + 0.3; bench(pcx + Math.cos(a) * 36.5, pcz + Math.sin(a) * 22.5, Math.abs(Math.sin(a)) > 0.7); }
+  for (const [u, v] of [[44, 28], [52, 28], [44, 33], [52, 33]]) bW(u - 0.15, v - 0.15, u + 0.15, v + 0.15, 2.9, M.post); // беседка
+  bW(42.5, 26.5, 53.5, 34.5, 0.3, M.roof, 2.9);
+  feat('беседка', w(48, 30), 7);
+  for (let k = 0; k < 26; k++) tW(6 + rnd2() * 10, 22 + rnd2() * 58, 7 + rnd2() * 4); // роща у западной ограды
+  for (let k = 0; k < 10; k++) tW(16 + rnd2() * 26, 76 + rnd2() * 6, 6 + rnd2() * 3);
+  playset(...w(92, 22), ...w(108, 38), false); pergola(...w(92, 41), ...w(100, 46));
+  feat('площадка для малышей', w(100, 30), 6);
+  rW(90, 60, 108, 78, C.stone, 0.065); // туманный сад: струйки тумана из камня между невысокими кустами
+  for (let k = 0; k < 9; k++) { const [x, z] = w(92 + (k % 3) * 6, 62 + Math.floor(k / 3) * 6); boxAt(x, z, x + 3, z + 2.5, 0.9, M.mist); }
+  for (let k = 0; k < 6; k++) bW(91 + k * 3, 77, 92.5 + k * 3, 78, 0.8, hedgeMat);
+  feat('туманный сад', w(99, 69), 6);
+
+  // ---- восток ----
+  rE(8, 42, 114, 46, C.stone, 0.065); // главная аллея
+  for (let u = 12; u < 112; u += 9) { tE(u, 39, 8 + rnd2() * 2); tE(u + 4.5, 49, 8 + rnd2() * 2); }
+  for (let u = 14; u < 110; u += 12) { bench(...e(u, 41.6), true); bench(...e(u + 6, 46.4), true); }
+  for (let k = 0; k < 6; k++) jetArc(...e(60 + k * 2.4, 40.5), ...e(61.2 + k * 2.4, 47.5), 1.6, 0.07); // прыгающие струи над дорожкой
+  feat('прыгающие струи над аллеей', e(64, 44), 7);
+  playset(...e(14, 8), ...e(44, 32), true); pergola(...e(14, 33.5), ...e(26, 37.5));
+  feat('большая детская площадка', e(29, 20), 8);
+  rE(50, 10, 64, 30, C.play, 0.075); // воркаут
+  for (let k = 0; k < 4; k++) { const [x, z] = e(52 + k * 3.2, 14 + (k % 2) * 8); boxAt(x - 0.06, z - 0.06, x + 0.06, z + 0.06, 2.4, M.post); boxAt(x - 0.06, z, x + 0.06, z + 2, 0.08, M.post, 2.3); boxAt(x - 0.06, z + 1.94, x + 0.06, z + 2.06, 2.4, M.post); }
+  feat('воркаут', e(57, 20), 6);
+  rE(70, 8, 102, 26, 0x93a59b, 0.075); // спортплощадка: мини-футбол, баскетбол, зимой каток
+  for (const [a, b, c, d] of [[70.3, 8.3, 101.7, 8.5], [70.3, 25.5, 101.7, 25.7], [70.3, 8.3, 70.5, 25.7], [101.5, 8.3, 101.7, 25.7], [85.9, 8.3, 86.1, 25.7]]) rE(a, b, c, d, C.mark, 0.08);
+  for (const [p, q, s, t] of [[70, 8, 102, 8.05], [70, 25.95, 102, 26], [70, 8, 70.05, 26], [101.95, 8, 102, 26]]) bE(p, q, s, t, 3, M.net);
+  feat('спортплощадка', e(86, 17), 7);
+  rE(104, 6, 115, 30, 0xb9b39f, 0.075); for (const v of [6, 30]) bE(104, v - 0.4, 115, v + 0.4, 1.2, hedgeMat); bE(104, 6, 104.8, 30, 1.2, hedgeMat);
+  feat('площадка для собак', e(110, 18), 6);
+  for (let u = 14; u <= 58; u += 7) for (let v = 53; v <= 81; v += 7) tE(u, v, 5 + rnd2()); // яблоневый сад: весной цветёт
+  feat('яблоневый сад', e(36, 67), 8);
+  playset(...e(66, 56), ...e(90, 76), false); pergola(...e(66, 77.5), ...e(76, 81.5));
+  feat('семейная площадка', e(78, 66), 6);
+  for (const u of [98, 106]) { bE(u, 57, u + 2.7, 58.5, 0.76, M.roof); } // настольный теннис
+  feat('настольный теннис', e(103, 58), 5);
+  for (let k = 0; k < 4; k++) bE(98 + k * 4, 72, 99.8 + k * 4, 74, 0.35, benchMat); // солнечная лужайка с шезлонгами
+  feat('лужайка с шезлонгами', e(105, 75), 5);
+
+  // ---- парадный двор у входа: подъезд с высадкой, сухой фонтан, въезд в паркинг ----
+  rect(-20, z0, -14, R.z0 - 12, C.road, 0.05); rect(14, z0, 20, R.z0 - 12, C.road, 0.05); rect(-20, R.z0 - 18, 20, R.z0 - 12, C.road, 0.051);
+  rect(-13, z0 + 7, 7, R.z0 - 19, C.stone, 0.055);
+  for (let i = 0; i < 6; i++) for (let j = 0; j < 4; j++) jetV(-11 + i * 3, z0 + 10 + j * 4, 1.2 + ((i + j) % 3) * 0.7);
+  feat('сухой фонтан: струи прямо из камня', [-3, z0 + 16], 7);
+  boxAt(8, z0 + 7, 13, z0 + 20, 1.2, mat({ color: 0xcfc8bc })); feat('въезд в паркинг', [10.5, z0 + 13], 5);
+  for (const x of [-22, 22]) for (let v = 8; v < 40; v += 8) tree(x, z0 + v, 7);
+}
+
 function buildGround() {
   const ground = rect(-4000, -4000, 4000, 4000, C.city, 0);
   // юг: тротуар с деревьями и кустами → дорога → тротуар у парка → парк
@@ -312,19 +448,16 @@ function buildGround() {
   rect(-700, S.park, 700, 660, C.lawn, 0.02);
   // север: площадка у входа (высадка, въезд в паркинг) → улица → тротуар → сквер → город
   rect(-700, S.plazaN, 700, R.z0, C.walk, 0.04);
-  rect(R.x0, S.plazaN, R.x1, R.z0, C.trav, 0.045);
+  rect(R.x0, T.z0, R.x1, R.z0, C.trav, 0.045);
   rect(-700, S.roadN, 700, S.plazaN, C.road, 0.03);
   rect(-700, S.walkN, 700, S.roadN, C.walk, 0.04);
   rect(-700, S.city, 700, S.walkN, C.lawn, 0.02);
-  // боковые улицы: на западе за двором, на востоке пожарный проезд и улица
-  rect(S.roadW, S.roadN, S.yard0, S.roadS, C.road, 0.035);
-  rect(R.x1, S.plazaN, S.roadE0, R.z1, C.walk, 0.045);
+  // боковые улицы за территорией
+  rect(S.roadW, S.roadN, T.x0, S.roadS, C.road, 0.035);
   rect(S.roadE0, S.roadN, S.roadE1, S.roadS, C.road, 0.035);
   // разметка и переход к парку
   for (const zc of [(S.walkS + S.roadS) / 2, (S.roadN + S.plazaN) / 2]) for (let x = -700; x < 700; x += 9) rect(x, zc - 0.08, x + 3, zc + 0.08, C.mark, 0.06);
   for (let i = 0; i < 8; i++) rect(-6 + i * 1.1, S.walkS + 0.5, -5.5 + i * 1.1, S.roadS - 0.5, C.mark, 0.065);
-  // въезд в паркинг у северо-восточного угла подиума
-  boxAt(R.x1 - 14, R.z0 - 7, R.x1 - 6, R.z0, 1.2, mat({ color: 0xcfc8bc }));
 
   // тротуар перед подиумом: небольшие деревья через 9 м, между ними кусты
   for (let x = -700; x < 700; x += 9) {
@@ -334,30 +467,11 @@ function buildGround() {
   }
   for (let x = -690; x < 700; x += 12) tree(x, (S.city + S.walkN) / 2 + (rnd2() - 0.5) * 8, 7 + rnd2() * 3); // сквер у северной улицы
 
-  // ---- Двор к западу от подиума: солнце с полудня до заката ----
-  rect(Y.x0, Y.z0, Y.x1, Y.z1, C.yard, 0.05);
-  rect(Y.x1 - 8, Y.z0, Y.x1, Y.z1, C.stone, 0.055);                        // светлый камень у выхода из лобби
-  const L = { x0: Y.x0 + 8, x1: Y.x1 - 14, z0: Y.z0 + 7, z1: Y.z1 - 7 }, w = 2.4, cz = (L.z0 + L.z1) / 2, cx = (L.x0 + L.x1) / 2;
-  rect(L.x0, L.z0, L.x1, L.z0 + w, C.stone, 0.055); rect(L.x0, L.z1 - w, L.x1, L.z1, C.stone, 0.055);  // дорожка-петля
-  rect(L.x0, L.z0, L.x0 + w, L.z1, C.stone, 0.056); rect(L.x1 - w, L.z0, L.x1, L.z1, C.stone, 0.056);
-  rect(L.x1, cz - 1.2, Y.x1 - 8, cz + 1.2, C.stone, 0.056);
-  rect(cx - 9, cz - 5, cx + 9, cz + 5, C.stone, 0.058);                     // водное зеркало, зимой каток
-  rect(cx - 8, cz - 4, cx + 8, cz + 4, C.water, 0.062, { roughness: 0.05, metalness: 0.4 });
-  rect(L.x0 + 4, L.z1 - 15, L.x0 + 17, L.z1 - 4, C.play, 0.06);            // площадка для игр в самом солнечном углу
-  boxAt(L.x0 + 6, L.z1 - 12, L.x0 + 9, L.z1 - 10, 1.8, benchMat); boxAt(L.x0 + 12, L.z1 - 8, L.x0 + 15, L.z1 - 6, 1.0, benchMat);
-  // живая изгородь по краю двора с калитками; уголки на одного вдоль западной изгороди
-  boxAt(Y.x0, Y.z0, Y.x0 + 1, cz - 2, 1.3, hedgeMat); boxAt(Y.x0, cz + 2, Y.x0 + 1, Y.z1, 1.3, hedgeMat);
-  boxAt(Y.x0, Y.z1 - 1, cx - 2, Y.z1, 1.3, hedgeMat); boxAt(cx + 2, Y.z1 - 1, Y.x1 - 8, Y.z1, 1.3, hedgeMat);
-  boxAt(Y.x0, Y.z0, Y.x1 - 8, Y.z0 + 1, 1.3, hedgeMat);
-  for (const z of [Y.z0 + 5, Y.z0 + 14, cz + 6, cz + 15]) {
-    boxAt(Y.x0 + 1, z, Y.x0 + 6.5, z + 0.8, 1.3, hedgeMat); boxAt(Y.x0 + 1, z + 6, Y.x0 + 6.5, z + 6.8, 1.3, hedgeMat);
-    boxAt(Y.x0 + 1.6, z + 2.4, Y.x0 + 2.2, z + 4.4, 0.45, benchMat);
-  }
-  for (const [x, z] of [[L.x0 + 4, L.z0 + 5], [L.x0 + 22, L.z0 + 4], [cx + 14, L.z0 + 5], [L.x1 + 5, L.z0 + 3], [L.x1 + 5, L.z1 - 3], [cx + 14, L.z1 - 5], [cx - 4, L.z1 - 4], [L.x0 - 4, cz], [cx + 2, L.z0 + 9]]) tree(x, z, 6 + rnd2() * 3);
+  buildTerritory();
 
   // ---- Парк: деревья, пруд, дорожка от перехода ----
   const pond = new THREE.Mesh(new THREE.CircleGeometry(1, 48), mat({ color: C.water, roughness: 0.05, metalness: 0.4 }));
-  pond.rotation.x = -Math.PI / 2; pond.scale.set(70, 38, 1); pond.position.set(-140, 0.03, 300); pond.receiveShadow = true; scene.add(pond);
+  pond.rotation.x = -Math.PI / 2; pond.scale.set(70, 38, 1); pond.position.set(-140, 0.03, 300); flat(pond, 0.03); scene.add(pond);
   rect(-8, S.park, -4, 200, C.stone, 0.03);
   for (let i = 0; i < 1100; i++) {
     const x = (rnd2() - 0.5) * 1400, z = S.park + 6 + rnd2() * 600;
@@ -378,15 +492,14 @@ function buildGround() {
 
 // ---- Город вокруг: край парка в городе ----
 // Ближние соседи заданы вручную (расстояния до башни), дальше до горизонта город собирается из кварталов разной формы.
-// low — только невысокие дома 3–9 эт.; high — плюс несколько башен 14–25 эт. (не выше ≈ 78 м, почти вдвое ниже ИНСО)
+// Кварталы 3–9 эт. и несколько групп башен 14–25 эт. (не выше ≈ 78 м, почти вдвое ниже ИНСО)
 const NEAR = [ // [x0, z0, x1, z1, этажей, форма, открытая сторона]
-  [-200, S.city - 18, -110, S.city, 5, 'office'], [-95, S.city - 18, -25, S.city, 6, 'office'], [-10, S.city - 18, 60, S.city, 7, 'office'],
-  [75, S.city - 18, 150, S.city, 6, 'office'], [165, S.city - 18, 250, S.city, 5, 'office'],
+  ...[[-330, -245, 5], [-230, -150, 6], [-135, -65, 7], [-50, 40, 6], [55, 125, 7], [140, 220, 6], [235, 330, 5]].map(([a, b, f]) => [a, S.city - 18, b, S.city, f, 'office']),
   [S.cityE, S.plazaN, S.cityE + 80, R.z1, 6, 'U', 's'], [S.cityE + 95, S.plazaN, S.cityE + 175, R.z1, 7, 'L', 'w'],
   [S.cityW - 85, S.plazaN, S.cityW, R.z1, 6, 'ring'], [S.cityW - 180, S.plazaN, S.cityW - 100, R.z1, 7, 'bars'],
 ];
 const NO_CITY = [ // где кварталов нет: участок с ближними соседями, дорога вдоль парка, парк
-  [-300, S.city - 25, 340, S.roadS + 5], [-720, R.z1, 720, S.park], [-720, S.park, 720, 700],
+  [-350, S.city - 25, 350, S.roadS + 5], [-720, R.z1, 720, S.park], [-720, S.park, 720, 700],
 ];
 const TOWER_SPOTS = [[650, -750, 350], [-950, -450, 300], [-250, -1500, 350], [900, 1150, 300]]; // где башни стоят группами
 const FACADES = ['#d6d0c7', '#d9cbb8', '#c9cacb', '#e0dcd4', '#cfd0cf']; // последний — офисы
@@ -454,7 +567,7 @@ function block(x0, z0, x1, z1, fl, form, open, r, fi) {
     case 'points': { const s = 18 + r() * 4; for (const [u, v] of [[0.08, 0.1], [0.62, 0.1], [0.08, 0.6], [0.62, 0.6]]) box(fi, x0 + u * (x1 - x0), z0 + v * (z1 - z0), x0 + u * (x1 - x0) + s, z0 + v * (z1 - z0) + s, fl + Math.floor(r() * 2), r); courtyard(x0 + 30, z0 + 30, x1 - 30, z1 - 30, r); break; }
   }
 }
-// башня (только в варианте high): точечная, пластина, двухступенчатая или пара
+// башня: точечная, пластина, двухступенчатая или пара
 function tower(x0, z0, x1, z1, r) {
   const fl = 14 + Math.floor(r() * 12), kind = Math.floor(r() * 4), cx = (x0 + x1) / 2 + 12, cz = (z0 + z1) / 2 + 10, fi = Math.floor(r() * 5);
   let h;
@@ -468,7 +581,7 @@ let city = new THREE.Group(); scene.add(city);
 let labels = new THREE.Group(); scene.add(labels);
 function buildCity() {
   scene.remove(city, labels); city = new THREE.Group(); labels = new THREE.Group();
-  const ev = opt.evening, high = opt.city === 'high';
+  const ev = opt.evening;
   cols = FACADES.map(newCol); roofCol = newCol(); lawnCol = newCol(); cityTrees = []; tops = [];
   let s = 23; const r = () => (s = (s * 16807) % 2147483647) / 2147483647;
   for (const [x0, z0, x1, z1, fl, form, open] of NEAR) {
@@ -481,7 +594,7 @@ function buildCity() {
     if (NO_CITY.some(([a, b, c, d]) => x0 < c && x1 > a && z0 < d && z1 > b)) continue;
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, dist = Math.hypot(cx, cz), u = r();
     const spot = TOWER_SPOTS.some(([tx, tz, tr]) => Math.hypot(cx - tx, cz - tz) < tr);
-    if (high && Math.abs(cx) > 160 && dist > 260 && r() < (spot ? 0.4 : 0.04)) { block(x0, z0, x1, z1, 5 + Math.floor(r() * 3), 'L', 'e', r, Math.floor(r() * 4)); tower(x0, z0, x1, z1, r); continue; }
+    if (Math.abs(cx) > 160 && dist > 260 && r() < (spot ? 0.4 : 0.04)) { block(x0, z0, x1, z1, 5 + Math.floor(r() * 3), 'L', 'e', r, Math.floor(r() * 4)); tower(x0, z0, x1, z1, r); continue; }
     if (u < 0.1) { block(x0, z0, x1 - 10, z1 - 20, 4 + Math.floor(r() * 4), 'office', null, r, 4); continue; }
     const low = u > 0.88, fl = low ? 3 + Math.floor(r() * 2) : 5 + Math.floor(r() * 5);
     block(x0, z0, x1, z1, Math.min(fl, 9), FORMS[Math.floor(r() * FORMS.length)], 'nsew'[Math.floor(r() * 4)], r, Math.floor(r() * 4));
@@ -489,13 +602,13 @@ function buildCity() {
   const geo = c => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(c.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(c.nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(c.uv, 2)); return g; };
   cols.forEach((c, i) => { if (!c.pos.length) return; const m = new THREE.Mesh(geo(c), facadeMat(i, ev)); m.castShadow = m.receiveShadow = true; city.add(m); });
   const roofs = new THREE.Mesh(geo(roofCol), mat({ color: 0xbdb8b1, side: THREE.DoubleSide })); roofs.castShadow = roofs.receiveShadow = true; city.add(roofs);
-  const lawns = new THREE.Mesh(geo(lawnCol), mat({ color: C.lawn, roughness: 1 })); lawns.receiveShadow = true; city.add(lawns);
+  const lawns = flat(new THREE.Mesh(geo(lawnCol), mat({ color: C.lawn, roughness: 1 })), 0.03); city.add(lawns);
   const dummy = new THREE.Object3D(), crowns = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), mat({ color: 0xa9aea4, roughness: 1 }), cityTrees.length);
   cityTrees.forEach(([x, z, h], i) => { dummy.position.set(x, h * 0.6, z); dummy.scale.setScalar(h * 0.35); dummy.updateMatrix(); crowns.setMatrixAt(i, dummy.matrix); });
   crowns.castShadow = true; city.add(crowns);
   for (const [x, h, z, fl] of tops) label(`${fl} эт.`, x, h + 10, z, labels);
   label('ИНСО · 141 м', 0, 152, 0, labels);
-  label('двор', (Y.x0 + Y.x1) / 2, 14, (Y.z0 + Y.z1) / 2, labels);
+  for (const [t, x, y, z] of FEATURES) label(t, x, y, z, labels, 3.2);
   label('парк', 60, 22, S.park + 120, labels);
   city.visible = opt.nb; labels.visible = opt.labels;
   scene.add(city, labels);
@@ -539,14 +652,15 @@ nbEl.checked = opt.nb; nbEl.onchange = () => { opt.nb = city.visible = nbEl.chec
 lbEl.checked = opt.labels; lbEl.onchange = () => { opt.labels = labels.visible = lbEl.checked; };
 evEl.checked = opt.evening; evEl.onchange = () => { opt.evening = evEl.checked; buildCity(); build(); };
 sunEl.checked = opt.sun; sunEl.onchange = () => { opt.sun = sunEl.checked; applyLight(); };
-const citySel = document.getElementById('city'); citySel.value = opt.city; citySel.onchange = () => { opt.city = citySel.value; buildCity(); };
 dateSel.onchange = () => { opt.date = dateSel.value; setDayBounds(); applyLight(); };
 tSlider.oninput = applyLight;
 
 const views = {
   park:    { pos: [95, 6, 290], target: [2, 70, 8] },
   street:  { pos: [16, 1.7, S.park + 2], target: [-6, 16, R.z1] },
-  yard:    { pos: [Y.x0 - 8, 24, Y.z1 + 26], target: [Y.x1 - 18, 6, (Y.z0 + Y.z1) / 2] },
+  territory: { pos: [0, 190, 230], target: [0, 0, -20] },
+  west:    { pos: [T.x0 - 15, 32, T.z1 + 30], target: [T.x0 + 60, 2, (T.z0 + T.z1) / 2] },
+  east:    { pos: [T.x1 + 15, 32, T.z1 + 30], target: [T.x1 - 60, 2, (T.z0 + T.z1) / 2] },
   corner:  { pos: [-170, 40, 170], target: [-15, 70, 5] },
   crown:   { pos: [-80, 160, 120], target: [0, 130, 5] },
   far:     { pos: [-200, 45, 560], target: [0, 70, 0] },
