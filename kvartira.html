@@ -27,6 +27,7 @@
   <h1>ИНСО — комната за гранями фасада</h1>
   <div><button id="hideUi">Спрятать панель для снимка</button> <span style="color:#555;font-size:12px">вернуть — клавиша H</span></div>
   <div>
+    <button data-view="hero">По оси на окно</button>
     <button data-view="back">Из глубины комнаты</button>
     <button data-view="window">У окна, вдоль граней</button>
     <button data-view="out">Взгляд в окно</button>
@@ -38,13 +39,14 @@
   <div>
     <button data-time="7">7:00</button>
     <button data-time="13">13:00</button>
+    <button data-time="15.75">15:45 закат</button>
     <button data-time="19">19:00</button>
     <button data-time="21.5">21:30</button>
   </div>
   <label>Этаж: <span id="floorLabel"></span><input type="range" id="floor" min="2" max="37" step="1"></label>
   <label>Комната вдоль фасада: <span id="roomLabel"></span><input type="range" id="room" min="0" max="8" step="1"></label>
   <label>Ширина комнаты: <span id="widthLabel"></span><input type="range" id="width" min="2" max="4" step="1"></label>
-  <div><button data-type="living">Гостиная</button><button data-type="bedroom">Спальня</button></div>
+  <div><button data-type="living">Гостиная</button><button data-type="bedroom">Спальня</button><button data-type="lounge">Гостиная с камином</button></div>
   <label><input type="checkbox" id="furn"> Мебель</label>
   <label><input type="checkbox" id="person"> Человек 1,75 м</label>
   <div id="info"></div>
@@ -65,7 +67,7 @@ const ZONES = [
 ];
 const params = new URLSearchParams(location.search);
 if (params.get('clean')) document.body.classList.add('clean');
-const opt = { type: params.get('type') === 'bedroom' ? 'bedroom' : 'living', floor: +(params.get('floor') || 20), room: +(params.get('room') || 3), width: +(params.get('width') || (params.get('type') === 'bedroom' ? 2 : 3)), time: +(params.get('t') || 13), furn: params.get('furn') !== '0', person: params.get('person') === '1' };
+const opt = { type: ['bedroom', 'lounge'].includes(params.get('type')) ? params.get('type') : 'living', floor: +(params.get('floor') || 20), room: +(params.get('room') || 3), width: +(params.get('width') || (['bedroom', 'lounge'].includes(params.get('type')) ? 2 : 3)), time: +(params.get('t') || 13), furn: params.get('furn') !== '0', person: params.get('person') === '1' };
 
 // ---- Южный фасад: линия от P1 до B, грани — сетка узлов, через один вынесены на FOLD ----
 const dirS = new V2(Math.cos(ROT * rad), -Math.sin(ROT * rad)), nS = new V2(Math.sin(ROT * rad), Math.cos(ROT * rad));
@@ -211,9 +213,21 @@ function build() {
     const armchair = (x, z, rot) => { const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot; grp.add(g); const add = (w, h, d, xx, yy, zz) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M_.cognac); b.position.set(xx, yy + h / 2, zz); b.castShadow = true; g.add(b); };
       add(0.85, 0.42, 0.85, 0, 0, 0); add(0.85, 0.4, 0.16, 0, 0.42, -0.36); add(0.14, 0.2, 0.85, -0.36, 0.42, 0); add(0.14, 0.2, 0.85, 0.36, 0.42, 0); };
     // шкаф-стена из ясеня вдоль одной перегородки — до половины глубины комнаты
-    B(0.6, FLOOR_H - SLAB - 0.02, 4.2, -hw + 0.3, 0, back + 2.1, M_.ash);
-    for (let k = 0; k < 6; k++) B(0.01, FLOOR_H - SLAB - 0.3, 0.004, -hw + 0.605, 0.15, back + 0.35 + k * 0.7, M_.dark); // щели фасадов
-    if (opt.type === 'living') {
+    if (opt.type !== 'lounge') B(0.6, FLOOR_H - SLAB - 0.02, 4.2, -hw + 0.3, 0, back + 2.1, M_.ash); // в гостиной с камином вместо шкафа стеновая панель
+    if (opt.type !== 'lounge') for (let k = 0; k < 6; k++) B(0.01, FLOOR_H - SLAB - 0.3, 0.004, -hw + 0.605, 0.15, back + 0.35 + k * 0.7, M_.dark); // щели фасадов
+    if (opt.type === 'lounge') { // как на референсах: слева камин и стеновая панель, по центру изогнутый диван и травертиновые столики, справа картина и скульптура
+      B(0.9, 0.42, 5.2, -hw + 0.45, 0, back + 3.2, mat({ color: 0x2e2a27, roughness: 0.5 }));            // длинный низкий камин-скамья из тёмного камня
+      B(2.2, 0.12, 0.35, -hw + 0.55, 0.42, back + 3.2, mat({ color: 0xffb35c, emissive: 0xff8a2a, emissiveIntensity: 1.2 })).rotation.y = Math.PI / 2; // пламя
+      B(0.5, FLOOR_H - SLAB - 0.44, 5.2, -hw + 0.25, 0.42, back + 3.2, mat({ color: 0xd8cdbd, roughness: 0.9 })); // стеновая панель над камином
+      B(4.0, 0.012, 3.2, 0.4, 0, -3.3, M_.rug);
+      for (let i = 0; i < 9; i++) { const a = -0.85 + i * 0.2125, r0 = 1.8, cx = 0.6, cz = -3.3; const b = B(0.9, 0.42, 0.78, cx + Math.cos(a) * r0, 0, cz + Math.sin(a) * r0, M_.boucle); b.rotation.y = Math.PI / 2 - a; const bb = B(0.9, 0.36, 0.2, cx + Math.cos(a) * (r0 + 0.39), 0.42, cz + Math.sin(a) * (r0 + 0.39), M_.boucle); bb.rotation.y = Math.PI / 2 - a; } // изогнутый диван дугой, боком к камере, лицом к камину
+      C(0.5, 0.36, 0.2, 0, -3.5, M_.trav); C(0.38, 0.3, -0.6, 0, -2.9, M_.trav);                         // два круглых столика из травертина
+      B(0.3, 0.1, 0.22, 0.2, 0.36, -3.5, M_.dark); C(0.08, 0.3, 0.4, 0.36, -3.4, M_.linen);
+      C(0.2, 0.55, 2.7, 0, -6.0, M_.trav); C(0.09, 0.25, 2.7, 0.55, -6.0, M_.linen);                       // столик у края дивана
+      armchair(-1.3, -1.6, 0.6);                                                                          // кресло у окна
+      B(0.04, 1.6, 1.2, hw - 0.03, 1.0, -4.2, M_.art);                                                    // картина на правой стене
+      B(0.4, 1.0, 0.4, hw - 0.6, 0, -1.6, M_.trav); C(0.12, 0.8, hw - 0.6, 1.0, -1.6, M_.bronze);          // скульптура на постаменте
+    } else if (opt.type === 'living') {
       B(3.8, 0.012, 2.8, 0.2, 0, -3.5, M_.rug);
       B(3.0, 0.42, 1.0, 0.2, 0, -5.0, M_.boucle); B(3.0, 0.38, 0.22, 0.2, 0.42, -5.39, M_.boucle); B(0.24, 0.2, 1.0, -1.18, 0.42, -5.0, M_.boucle); B(0.24, 0.2, 1.0, 1.58, 0.42, -5.0, M_.boucle); // низкий диван лицом к окну
       B(1.2, 0.08, 0.5, -0.4, 0.42, -4.75, M_.linen); // плед
@@ -249,10 +263,11 @@ function build() {
 // ---- Время суток: 7:00, 13:00, 19:00, 21:30 15 ноября (экран 6) ----
 function sunDir(t) { const Hh = 15 * (t - 12) * rad, phi = LAT * rad, d = DECL * rad; const alt = Math.asin(Math.sin(phi) * Math.sin(d) + Math.cos(phi) * Math.cos(d) * Math.cos(Hh)); const az = Math.atan2(Math.sin(Hh), Math.cos(Hh) * Math.sin(phi) - Math.tan(d) * Math.cos(phi)); return { alt, v: new V3(-Math.sin(az) * Math.cos(alt), Math.sin(alt), Math.cos(az) * Math.cos(alt)) }; }
 function applyTime() {
-  const t = opt.time, night = t < 8 || t > 16.5;
+  const t = opt.time, night = t < 8 || t > 16.1;
   const presets = {
     7:    { ground: 0x5a5650, sky: [[0, '#1c2440'], [0.42, '#34406a'], [0.5, '#6b6a86'], [1, '#2a2e38']], fog: 0x3a4262, hemi: 0.12, glow: 1.2, lamp: 9, color: 0xf6f3ee, city: true },
     13:   { ground: 0xd9cfbf, sky: [[0, '#8fb3d6'], [0.45, '#cfe0ec'], [0.5, '#f3e6d6'], [1, '#b9bdb3']], fog: 0xdfe6ec, hemi: 1.5, glow: 0.05, lamp: 0, color: 0xffffff, city: false },
+    15.75: { ground: 0xc9a684, sky: [[0, '#6f7fa6'], [0.35, '#d9a0a0'], [0.47, '#f3b98a'], [0.5, '#f7cf98'], [1, '#6e6258']], fog: 0xe8b993, hemi: 0.75, glow: 0.5, lamp: 4, color: 0xffd9a8, city: true },
     19:   { ground: 0x5a5046, sky: [[0, '#161b2e'], [0.45, '#2a3150'], [0.5, '#45405a'], [1, '#22252e']], fog: 0x2c3248, hemi: 0.1, glow: 1.1, lamp: 8, color: 0xffe6c4, city: true },
     21.5: { ground: 0x3a342e, sky: [[0, '#0f1322'], [0.45, '#1e2336'], [0.5, '#2c2a3a'], [1, '#1a1c22']], fog: 0x1e2234, hemi: 0.06, glow: 0.35, lamp: 2.5, color: 0xffd7a8, city: true },
   }[t];
@@ -270,10 +285,12 @@ function setView(name) {
   if (name === 'back') { pos = W(s0 + 1.1, -APT + 0.6, yF + 1.6); tgt = W(s1 - 1.5, 1.5, yF + 1.3); } // из угла у входа в комнату
   if (name === 'window') { pos = W(s0 + 1.0, -1.6, yF + 1.6); tgt = W(s1 - 0.6, offsetAt(s1 - 0.6, yF + 1.4) - 0.3, yF + 1.35); } // вдоль ломаного стекла
   if (name === 'out') { pos = W(sm, -1.5, yF + 1.6); tgt = W(sm, 60, yF - 8); }
+  if (name === 'hero') { pos = W(sm, -APT + 0.35, yF + 1.3); tgt = W(sm, 3, yF + 1.25); } // из глубины по оси, прямо на стекло
   if (name === 'corner2') { pos = W(s1 - 0.6, -APT + 0.6, yF + 1.6); tgt = W(s0 + 1.5, 1.5, yF + 1.3); }
   if (name === 'fromwindow') { pos = W(sm + 1.2, Math.min(offsetAt(sm + 1.2, yF), offsetAt(sm + 1.2, room.yC)) - 0.6, yF + 1.6); tgt = W(sm - 0.8, -APT, yF + 1.1); }
   if (name === 'seated') { pos = W(sm, opt.type === 'living' ? -4.7 : -APT + 1.6, yF + (opt.type === 'living' ? 1.1 : 1.2)); tgt = W(sm, 6, yF + 1.0); }
   if (name === 'plan') { pos = W(sm, -1, room.yC + 14); tgt = W(sm, -1, yF); }
+  camera.fov = name === 'hero' ? 58 : 62; camera.updateProjectionMatrix(); // по оси — объектив чуть уже, меньше потолка
   camera.position.copy(pos); controls.target.copy(tgt); controls.update();
   house.children.forEach(c => { if (c.material === CEIL || c.material === GLOW) c.visible = name !== 'plan'; });
   document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === name));
