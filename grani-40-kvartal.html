@@ -514,23 +514,55 @@ function gym(cx, cz) {
 // дворы ближайших соседних домов: чем ближе к ИНСО, тем подробнее (2 — дорожки, площадка, скамейки, мини-поле; 1 — дорожки и площадка)
 let yardGroup = null;
 const YARDS = [];
+const CAR_MATS = [0x5d6166, 0x8c9096, 0x2f3338, 0xb7b9bb, 0x6f5f55].map(color => mat({ color, roughness: 0.4, metalness: 0.3 }));
+const YARD_TREES = [];
+function kids(cx, cz, rx, rz, r) { // большая площадка: башня с горкой, качели, карусель, «паутинка», песочница, качалки
+  blob(roundPts(cx, cz, rx, rz, 9, 0.14, Math.floor(r() * 9)), K.soft, 0.075);
+  boxAt(cx - rx * 0.55, cz - rz * 0.35, cx - rx * 0.55 + 3, cz - rz * 0.35 + 3, 3, M.play);
+  rotBox(cx - rx * 0.55 + 1.5, cz - rz * 0.35 + 5.2, 1, 4.5, 0.1, 0, M.wood, 1.2).rotation.x = 0.6;
+  const sx = cx + rx * 0.05, sz = cz - rz * 0.45;
+  for (const dx of [0, 6]) boxAt(sx + dx - 0.1, sz - 0.1, sx + dx + 0.1, sz + 0.1, 2.4, M.post); boxAt(sx, sz - 0.08, sx + 6, sz + 0.08, 0.16, M.post, 2.3);
+  for (const dx of [1.5, 4.5]) rotBox(sx + dx, sz, 0.5, 0.25, 0.05, 0, M.wood, 0.5);
+  cyl(cx + rx * 0.5, cz - rz * 0.2, 1.3, 0.15, M.play, 0.3); cyl(cx + rx * 0.5, cz - rz * 0.2, 0.08, 1, GYM);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(2.2, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x4f5459, wireframe: true }));
+  dome.position.set(cx + rx * 0.15, 0, cz + rz * 0.4); TARGET.add(dome);
+  boxAt(cx - rx * 0.4, cz + rz * 0.25, cx - rx * 0.4 + 3.5, cz + rz * 0.25 + 3.5, 0.35, mat({ color: K.sand }));
+  for (let k = 0; k < 3; k++) cyl(cx + rx * 0.45 + k * 1.4, cz + rz * 0.45, 0.25, 0.7, M.play);
+}
 function neighbourYard(x0, z0, x1, z1, level, seed) {
-  const w = x1 - x0, d = z1 - z0; if (w < 16 || d < 16) return;
+  let w = x1 - x0, d = z1 - z0; if (w < 20 || d < 20) return;
   let s = seed; const r = () => (s = (s * 16807) % 2147483647) / 2147483647;
-  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-  rect(cx - 1.2, z0 + 1, cx + 1.2, z1 - 1, K.walk, 0.062); rect(x0 + 1, cz - 1.2, x1 - 1, cz + 1.2, K.walk, 0.062);
-  if (level > 1 && w > 26 && d > 26) { rect(x0 + 3, z0 + 3, x1 - 3, z0 + 4.8, K.walk, 0.061); rect(x0 + 3, z1 - 4.8, x1 - 3, z1 - 3, K.walk, 0.061); rect(x0 + 3, z0 + 3, x0 + 4.8, z1 - 3, K.walk, 0.0615); rect(x1 - 4.8, z0 + 3, x1 - 3, z1 - 3, K.walk, 0.0615); }
-  const q = Math.floor(r() * 4), qx = q % 2 ? 1 : -1, qz = q > 1 ? 1 : -1;
-  const pr = Math.min(w, d) * 0.17, px = cx + qx * w / 4, pz = cz + qz * d / 4;
-  blob(roundPts(px, pz, pr * 1.2, pr, 8, 0.15, seed % 7), K.soft, 0.075);
-  boxAt(px - pr * 0.5, pz - pr * 0.4, px - pr * 0.5 + 2.5, pz - pr * 0.4 + 2.5, 2.2, M.play);
-  boxAt(px + pr * 0.1, pz + pr * 0.2, px + pr * 0.1 + 0.2, pz + pr * 0.2 + 0.2, 2.2, M.post); boxAt(px + pr * 0.1 + 3, pz + pr * 0.2, px + pr * 0.1 + 3.2, pz + pr * 0.2 + 0.2, 2.2, M.post); boxAt(px + pr * 0.1, pz + pr * 0.2, px + pr * 0.1 + 3.2, pz + pr * 0.2 + 0.15, 0.15, M.post, 2.1);
-  for (let k = 0; k < (level > 1 ? 4 : 2); k++) bench(px + (k - 1.5) * 3, pz - qz * (pr + 2), Math.PI / 2);
-  if (level > 1 && w > 40 && d > 40) { // мини-поле в противоположной четверти
-    const fx = cx - qx * w / 4, fz = cz - qz * d / 4, fw = Math.min(18, w / 2 - 6), fd = Math.min(11, d / 2 - 6);
+  let iz0 = z0, iz1 = z1;
+  // проезд вдоль корпуса с машинами у тротуара (только у ближних дворов)
+  if (level > 1 && d > 36) {
+    const north = r() < 0.5, zA = north ? z0 + 1 : z1 - 7;
+    rect(x0 + 1, zA, x1 - 1, zA + 6, C.road, 0.061);
+    for (let x = x0 + 4; x < x1 - 6; x += 5.5) if (r() < 0.65) rotBox(x, north ? zA + 1.3 : zA + 4.7, 4.4, 1.8, 1.4, 0, CAR_MATS[Math.floor(r() * 5)], 0.1);
+    if (north) iz0 = z0 + 8; else iz1 = z1 - 8;
+  }
+  d = iz1 - iz0;
+  const cx = (x0 + x1) / 2 + (r() - 0.5) * w * 0.1, cz = (iz0 + iz1) / 2 + (r() - 0.5) * d * 0.1;
+  // пятачок в центре и дорожки к нему от входов в подъезды и арок — с изгибом, как протоптали
+  blob(roundPts(cx, cz, 5, 4, 8, 0.1, seed % 9), K.prom, 0.063);
+  const ends = [[x0 + 1, iz0 + d * (0.3 + r() * 0.4)], [x1 - 1, iz0 + d * (0.3 + r() * 0.4)], [x0 + w * (0.25 + r() * 0.5), iz0 + 1], [x0 + w * (0.25 + r() * 0.5), iz1 - 1]];
+  for (const [ex, ez] of ends) {
+    if (r() < 0.2) continue;
+    const mx = (ex + cx) / 2, mz = (ez + cz) / 2, dx = cz - ez, dz = ex - cx, L = Math.hypot(dx, dz) || 1, k = (r() - 0.5) * 0.5;
+    ribbon([new V2(ex, ez), new V2(mx + dx / L * L * k * 0.5, mz + dz / L * L * k * 0.5), new V2(cx, cz)], 2.2, K.walk, 0.062);
+  }
+  // детская площадка: большая, в солнечной южной части двора; рядом поменьше — для малышей
+  const prx = Math.min(16, w * 0.24), prz = Math.min(11, d * 0.2), px = cx + (r() < 0.5 ? -1 : 1) * w * 0.18, pz = iz1 - prz - 3;
+  kids(px, pz, prx, prz, r);
+  if (level > 1) { const tx = px + (px < cx ? 1 : -1) * (prx + 8); blob(roundPts(tx, pz + 1, 6, 5, 7, 0.15, seed % 5), K.soft, 0.075); boxAt(tx - 1.5, pz, tx + 1.5, pz + 2.5, 1.6, M.play); boxAt(tx + 1.5, pz + 2, tx + 4, pz + 4.5, 0.3, mat({ color: K.sand })); }
+  for (let k = 0; k < (level > 1 ? 6 : 3); k++) { const a = Math.PI * (1.1 + k * 0.16); bench(px + Math.cos(a) * (prx + 2.5), pz + Math.sin(a) * (prz + 2.5), a + Math.PI / 2); }
+  // спортивная «коробка» в северной половине большого двора
+  if (level > 1 && w > 50 && d > 40) {
+    const fx = cx + (px < cx ? 1 : -1) * w * 0.2, fz = iz0 + 10, fw = Math.min(22, w * 0.35), fd = Math.min(13, d * 0.3);
     rect(fx - fw / 2, fz - fd / 2, fx + fw / 2, fz + fd / 2, K.court, 0.075);
     for (const [a, b, c, e] of [[fx - fw / 2, fz - fd / 2, fx + fw / 2, fz - fd / 2 + 0.05], [fx - fw / 2, fz + fd / 2 - 0.05, fx + fw / 2, fz + fd / 2], [fx - fw / 2, fz - fd / 2, fx - fw / 2 + 0.05, fz + fd / 2], [fx + fw / 2 - 0.05, fz - fd / 2, fx + fw / 2, fz + fd / 2]]) boxAt(a, b, c, e, 2.5, M.net);
   }
+  // деревья группами по свободным углам
+  for (const [gx, gz] of [[x0 + 6, iz0 + 6], [x1 - 6, iz0 + 6], [x0 + 6, cz], [x1 - 6, cz]]) if (r() < 0.75) for (let k = 0; k < 3 + Math.floor(r() * 3); k++) YARD_TREES.push([gx + (r() - 0.5) * 8, gz + (r() - 0.5) * 8, 6 + r() * 4]);
 }
 
 function buildGround() {
@@ -643,7 +675,8 @@ function bar(fi, x0, z0, x1, z1, fl, r) {
 }
 function courtyard(x0, z0, x1, z1, r) {
   pushFlat(lawnCol, x0, z0, x1, z1, 0.03); YARDS.push([x0, z0, x1, z1]);
-  const n = 1 + Math.floor(r() * 3); for (let i = 0; i < n; i++) cityTrees.push([x0 + 4 + r() * (x1 - x0 - 8), z0 + 4 + r() * (z1 - z0 - 8), 6 + r() * 4]);
+  const n = 1 + Math.floor(r() * 3); if (Math.hypot((x0 + x1) / 2, (z0 + z1) / 2) < 480) return; // ближние дворы прорисованы отдельно
+  for (let i = 0; i < n; i++) cityTrees.push([x0 + 4 + r() * (x1 - x0 - 8), z0 + 4 + r() * (z1 - z0 - 8), 6 + r() * 4]);
 }
 function block(x0, z0, x1, z1, fl, form, open, r, fi) {
   const D = 13 + Math.floor(r() * 3);
@@ -697,6 +730,9 @@ function buildCity() {
   if (!yardGroup) { // дворы ближайших домов: строятся один раз, ближе 280 м подробно, до 480 м проще, дальше только газон и деревья
     yardGroup = new THREE.Group(); TARGET = yardGroup;
     YARDS.forEach(([x0, z0, x1, z1], i) => { const d = Math.hypot((x0 + x1) / 2, (z0 + z1) / 2); if (d < 480) neighbourYard(x0, z0, x1, z1, d < 280 ? 2 : 1, 101 + i * 7); });
+    const dm = new THREE.Object3D(), yc = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), mat({ color: 0xa9aea4, roughness: 1 }), YARD_TREES.length);
+    YARD_TREES.forEach(([x, z, h], i) => { dm.position.set(x, h * 0.6, z); dm.scale.setScalar(h * 0.35); dm.updateMatrix(); yc.setMatrixAt(i, dm.matrix); });
+    yc.castShadow = true; yardGroup.add(yc);
     TARGET = scene; scene.add(yardGroup);
   }
   yardGroup.visible = opt.nb;
