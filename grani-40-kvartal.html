@@ -273,18 +273,24 @@ function build() {
     g.beginPath(); g.moveTo(0, c.height - 4.5 * PX); g.lineTo(c.width, c.height - 4.5 * PX); g.stroke();
     house.add(wall(p, q, 0.5, PH, new V2(-d.y, d.x), mat({ map: toTex(c), roughness: 0.15, metalness: 0.2, emissive: ev ? 0x8a6234 : 0, emissiveIntensity: ev ? 0.75 : 0 })));
   }
-  // главный вход в лобби: северная стена подиума, по центру; стеклянный портал в два этажа без козырька, внутри тёплый свет, порог из травертина вровень с землёй
-  { const dark = mat({ color: 0x2f3338, metalness: 0.4, roughness: 0.4 }), z = R.z0 - 0.1, W = 14, H = 8;
+  // входы в лобби: стеклянный портал без козырька, внутри тёплый свет, порог из травертина вровень с землёй.
+  // Главный — с лицевой стороны, к парку (южная стена по центру, напротив перехода); второй, поменьше, — с севера, от высадки и паркинга
+  const portal = (z, dir, W, H) => {
+    const dark = mat({ color: 0x2f3338, metalness: 0.4, roughness: 0.4 });
     const glass = mat({ color: ev ? 0xf4dcb0 : 0xa3b6c6, roughness: 0.1, metalness: 0.3, emissive: ev ? warm : 0x000000, emissiveIntensity: ev ? 0.9 : 0 });
-    const part = (x0, y0, x1, y1, m) => { const fr = m === dark, b = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, fr ? 0.2 : 0.25), m); b.position.set((x0 + x1) / 2, (y0 + y1) / 2, fr ? z - 0.18 : z); b.castShadow = true; house.add(b); };
+    const part = (x0, y0, x1, y1, m) => { const fr = m === dark, b = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, y1 - y0, fr ? 0.2 : 0.25), m); b.position.set((x0 + x1) / 2, (y0 + y1) / 2, fr ? z + dir * 0.18 : z); b.castShadow = true; house.add(b); };
+    const dh = Math.min(3.6, H - 0.5);
     part(-W / 2, 0.5, W / 2, H, glass);                                   // витрина портала
     for (const x of [-W / 2, -W / 6, W / 6, W / 2]) part(x - 0.1, 0.5, x + 0.1, H, dark);  // импосты: три секции, в средней двери
-    for (const x of [-W / 6 + 1.2, W / 6 - 1.2]) part(x - 0.04, 0.5, x + 0.04, 3.6, dark);   // створки распашных дверей
+    for (const x of [-W / 6 + 1.2, W / 6 - 1.2]) part(x - 0.04, 0.5, x + 0.04, dh, dark);   // створки распашных дверей
     for (const x of [-1.8, 1.8]) part(x - 0.5, 1.2, x + 0.5, 1.35, dark); // ручки-накладки
-    part(-W / 2, H - 0.1, W / 2, H + 0.1, dark); part(-W / 2, 3.6, W / 2, 3.8, dark);       // ригель над дверями
+    part(-W / 2, H - 0.1, W / 2, H + 0.1, dark); part(-W / 2, dh, W / 2, dh + 0.2, dark);  // ригель над дверями
     part(-W / 6 - 0.1, 0.5, W / 6 + 0.1, 0.65, dark);
-    const step = new THREE.Mesh(new THREE.BoxGeometry(W + 3, 0.12, 3.2), mat({ color: 0xe8e1d4 })); step.position.set(0, 0.06, z - 1.5); step.receiveShadow = true; house.add(step);  // травертиновый порог
-    if (ev) { const g = new THREE.PointLight(0xffc27a, 60, 24); g.position.set(0, 3, z - 4); house.add(g); } }
+    const step = new THREE.Mesh(new THREE.BoxGeometry(W + 3, 0.12, 3.2), mat({ color: 0xe8e1d4 })); step.position.set(0, 0.06, z + dir * 1.5); step.receiveShadow = true; house.add(step);
+    if (ev) { const g = new THREE.PointLight(0xffc27a, W * 4, 24); g.position.set(0, 3, z + dir * 4); house.add(g); }
+  };
+  portal(R.z1 + 0.1, 1, 14, 8);
+  portal(R.z0 - 0.1, -1, 8, 4.5);
   house.add(slab(offsetPlan(pplan, 0.8), PH, 0.5, ceramic));
   if (ev) house.add(slab(offsetPlan(pplan, 0.7), PH - 0.04, 0.04, mat({ color: 0xffd9a0, emissive: warm, emissiveIntensity: 0.8 })));
   house.add(slab(pplan, 0, 0.5, mat({ color: 0xd8c9ad })));                                         // травертиновый цоколь
@@ -512,7 +518,7 @@ function buildTerritory() {
   rect(-12, cz + 8, 12, R.z0, K.prom, 0.056);   // каменная площадка перед главным входом, на ширину портала с запасом
   // пешеходные дорожки от северного тротуара вокруг овала к входу: слева и справа, асфальт подъезда обходят
   for (const sd of [-1, 1]) ribbon([new V2(sd * 24, S.plazaN), new V2(sd * 22, cz - 6), new V2(sd * 20, cz + 8), new V2(sd * 9, R.z0 - 6), new V2(sd * 4, R.z0 - 1)], 3.5, K.prom, 0.057);
-  FEATURES.push(['главный вход в лобби', 0, 12, R.z0 - 2]);
+  FEATURES.push(['главный вход в лобби — с лицевой стороны, к парку', 0, 12, R.z1 + 3]); FEATURES.push(['второй вход: высадка и паркинг', 0, 8, R.z0 - 2]);
   boxAt(14, T.z0, 22, T.z0 + 7, 1.2, mat({ color: 0xcfc8bc })); FEATURES.push(['въезд в паркинг', 18, 5, T.z0 + 3]);
   for (const x of [-27, 27]) for (let z = T.z0 + 10; z < cz + 12; z += 8) tree(x, z, 7);
 }
@@ -642,16 +648,21 @@ function buildGround() {
   const XW = [-6, -24, 24];
   for (const [zA, zB] of [[S.walkS, S.roadS], [S.roadN, S.plazaN]]) {
     const zc = (zA + zB) / 2;
-    for (let x = -700; x < 700; x += 9) if (!(zA === S.walkS ? [-6] : [-24, 24, 0]).some(c => Math.abs(x + 1.5 - c) < 9)) rect(x, zc - 0.08, x + 3, zc + 0.08, C.mark, 0.062);
+    for (let x = -700; x < 700; x += 9) if (!(zA === S.walkS ? [0] : [-24, 24, 0]).some(c => Math.abs(x + 1.5 - c) < 9)) rect(x, zc - 0.08, x + 3, zc + 0.08, C.mark, 0.062);
     rect(-700, zA + 0.25, 700, zA + 0.35, C.mark, 0.061); rect(-700, zB - 0.35, 700, zB - 0.25, C.mark, 0.061);
   }
-  zebra(-6, S.walkS, S.roadS, true); zebra(-24, S.roadN, S.plazaN, false); zebra(24, S.roadN, S.plazaN, false);
+  zebra(0, S.walkS, S.roadS, true); zebra(-24, S.roadN, S.plazaN, false); zebra(24, S.roadN, S.plazaN, false);
 
+  // перед главным входом: площадка из камня до бордюра, по оси — переход к парку; рядом карман для высадки и такси
+  rect(-14, R.z1, 14, S.walkS, K.prom, 0.05);
+  rect(18, S.walkS - 3, 48, S.walkS, C.road, 0.045); rect(18, S.walkS - 3.1, 48, S.walkS - 3, C.mark, 0.051);
+  for (let x = 20; x < 46; x += 6.5) rect(x, S.walkS - 3, x + 0.1, S.walkS, C.mark, 0.051);
+  FEATURES.push(['карман для такси', 33, 4, S.walkS - 1.5]);
   // уличные фонари вдоль улицы у парка и северной улицы: опоры 8 м через 30 м
   for (let x = -690; x < 700; x += 30) { lamp(x + 4.5, S.walkS - 0.6, 8, 11); lamp(x + 19.5, S.roadS + 0.6, 8, 11); lamp(x + 4.5, S.roadN - 0.6, 8, 11); lamp(x + 19.5, S.plazaN + 0.6, 8, 11); }
   // тротуар перед подиумом: небольшие деревья через 9 м, между ними кусты
   for (let x = -700; x < 700; x += 9) {
-    if (x > -10 && x < 6) continue;                                       // у перехода просвет
+    if (x > -16 && x < 50) continue;                                      // перед главным входом площадка, рядом карман для такси
     tree(x, R.z1 + 7.5, 5 + rnd2());
     boxAt(x + 3.2, R.z1 + 7, x + 5.8, R.z1 + 8, 0.9, hedgeMat);
   }
@@ -662,13 +673,13 @@ function buildGround() {
   // ---- Парк: деревья, пруд, дорожка от перехода ----
   const pond = new THREE.Mesh(new THREE.CircleGeometry(1, 48), mat({ color: C.water, roughness: 0.05, metalness: 0.4 }));
   pond.rotation.x = -Math.PI / 2; pond.scale.set(70, 38, 1); pond.position.set(-140, 0.03, 300); flat(pond, 0.03); scene.add(pond);
-  rect(-8, S.park, -4, 200, C.stone, 0.03);
-  for (let z = S.park + 8; z < 200; z += 18) lamp(-9.5, z, 4.2, 8); // фонари в парке вдоль дорожки от перехода
+  rect(-2.5, S.park, 2.5, 200, C.stone, 0.03);
+  for (let z = S.park + 8; z < 200; z += 18) lamp(-4, z, 4.2, 8); // фонари в парке вдоль дорожки от перехода
   for (let k = 0; k < 40; k++) { const a = k / 40 * Math.PI * 2; lamp(-140 + Math.cos(a) * 78, 300 + Math.sin(a) * 44, 4, 7); } // и вокруг паркового пруда
   for (let i = 0; i < 1100; i++) {
     const x = (rnd2() - 0.5) * 1400, z = S.park + 6 + rnd2() * 600;
     if (((x + 140) / 80) ** 2 + ((z - 300) / 46) ** 2 < 1) continue;     // пруд
-    if (Math.abs(x + 6) < 6 && z < 200) continue;                         // дорожка
+    if (Math.abs(x) < 7 && z < 200) continue;                         // дорожка
     if (((x - 120) / 60) ** 2 + ((z - 140) / 40) ** 2 < 1) continue;      // поляна
     tree(x, z, 8 + rnd2() * 6);
   }
@@ -898,7 +909,7 @@ tSlider.oninput = applyLight;
 const views = {
   park:    { pos: [95, 6, 290], target: [2, 70, 8] },
   street:  { pos: [16, 1.7, S.park + 2], target: [-6, 16, R.z1] },
-  entrance: { pos: [14, 3.2, R.z0 - 20], target: [0, 4.2, R.z0] },
+  entrance: { pos: [10, 3.2, S.park + 6], target: [0, 4.5, R.z1] },
   territory: { pos: [0, 190, 230], target: [0, 0, -20] },
   west:    { pos: [T.x0 - 15, 32, T.z1 + 30], target: [T.x0 + 60, 2, (T.z0 + T.z1) / 2] },
   east:    { pos: [T.x1 + 15, 32, T.z1 + 30], target: [T.x1 - 60, 2, (T.z0 + T.z1) / 2] },
