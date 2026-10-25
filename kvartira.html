@@ -27,6 +27,8 @@
   <h1>ИНСО — комната за гранями фасада</h1>
   <div><button id="hideUi">Спрятать панель для снимка</button> <span style="color:#555;font-size:12px">вернуть — клавиша H</span></div>
   <div>
+    <button data-view="along">Вдоль стекла</button>
+    <button data-view="tocorner">В угол</button>
     <button data-view="hero">По оси на окно</button>
     <button data-view="back">Из глубины комнаты</button>
     <button data-view="window">У окна, вдоль граней</button>
@@ -46,7 +48,7 @@
   <label>Этаж: <span id="floorLabel"></span><input type="range" id="floor" min="2" max="37" step="1"></label>
   <label>Комната вдоль фасада: <span id="roomLabel"></span><input type="range" id="room" min="0" max="8" step="1"></label>
   <label>Ширина комнаты: <span id="widthLabel"></span><input type="range" id="width" min="2" max="6" step="1"></label>
-  <div><button data-type="living">Гостиная</button><button data-type="bedroom">Спальня</button><button data-type="lounge">Гостиная с камином</button></div>
+  <div><button data-type="corner">Угловая гостиная</button><button data-type="living">Гостиная</button><button data-type="bedroom">Спальня</button><button data-type="lounge">Гостиная с камином</button></div>
   <label><input type="checkbox" id="furn"> Мебель</label>
   <label><input type="checkbox" id="person"> Человек 1,75 м</label>
   <label>Объектив: <span id="fovLabel"></span><input type="range" id="fov" min="30" max="95" step="1"></label>
@@ -69,7 +71,7 @@ const ZONES = [
 ];
 const params = new URLSearchParams(location.search);
 if (params.get('clean')) document.body.classList.add('clean');
-const opt = { type: ['bedroom', 'lounge'].includes(params.get('type')) ? params.get('type') : 'living', floor: +(params.get('floor') || 20), room: +(params.get('room') || 3), width: +(params.get('width') || (params.get('type') === 'bedroom' ? 2 : 3)), time: +(params.get('t') || 13), furn: params.get('furn') !== '0', person: params.get('person') === '1' };
+const opt = { type: ['bedroom', 'lounge', 'corner'].includes(params.get('type')) ? params.get('type') : 'corner', floor: +(params.get('floor') || 20), room: +(params.get('room') || 3), width: +(params.get('width') || (params.get('type') === 'bedroom' ? 2 : (params.get('type') || 'corner') === 'corner' ? 4 : 3)), time: +(params.get('t') || 13), furn: params.get('furn') !== '0', person: params.get('person') === '1' };
 
 // ---- Южный фасад: линия от P1 до B, грани — сетка узлов, через один вынесены на FOLD ----
 const dirS = new V2(Math.cos(ROT * rad), -Math.sin(ROT * rad)), nS = new V2(Math.sin(ROT * rad), Math.cos(ROT * rad));
@@ -184,11 +186,25 @@ function flatPoly(pts2, y, material, down) { // многоугольник в п
   const shape = new THREE.Shape(pts2.map(p => down ? new V2(p.x, p.z) : new V2(p.x, -p.z)));
   const g = new THREE.ShapeGeometry(shape); g.rotateX(down ? Math.PI / 2 : -Math.PI / 2); const m = new THREE.Mesh(g, material); m.position.y = y; m.receiveShadow = true; return m;
 }
-function slabAt(f, s0 = 0, s1 = L) { // перекрытие этажа: от коридора до стекла на уровне пола
+// юго-западный угол: срезанная грань P2→P1 (угловые окна) и западный торец от P2 строго на север
+const dCut = CUT * (Math.sin(ROT * rad) + Math.cos(ROT * rad) * Math.tan(30 * rad));
+const P2s = -CUT + Math.sin(ROT * rad) * dCut, P2d = -Math.cos(ROT * rad) * dCut;      // P2 в координатах фасада (s, d)
+const westAt = d => P2s + Math.sin(ROT * rad) * (-d + P2d) / Math.cos(ROT * rad);       // s западного торца на глубине d (d < P2d)
+function slabAt(f, s0 = 0, s1 = L) { // перекрытие этажа: от коридора до стекла на уровне пола, с углом дома
   const y = Y0 + f * FLOOR_H, edge = slice(y, s0, s1).map(([s, d]) => W(s, d, 0));
-  const pts = [W(s0, -APT, 0), ...edge, W(s1, -APT, 0)];
+  const pts = s0 === 0 ? [W(westAt(-APT), -APT, 0), W(P2s, P2d, 0), ...edge, W(s1, -APT, 0)] : [W(s0, -APT, 0), ...edge, W(s1, -APT, 0)];
   const shape = new THREE.Shape(pts.map(p => new V2(p.x, -p.z))), g = new THREE.ExtrudeGeometry(shape, { depth: SLAB, bevelEnabled: false }); g.rotateX(-Math.PI / 2);
   const m = new THREE.Mesh(g, mat({ color: 0xd9d4cc })); m.position.y = y - SLAB; m.castShadow = m.receiveShadow = true; return m;
+}
+function glassSide(a, b) { // вертикальное стекло угла и торца на всю высоту: импосты и кромки перекрытий
+  const len = Math.hypot(b.x - a.x, b.z - a.z), n = Math.max(1, Math.round(len / 1.7));
+  const t = canvasTex(256, 2048, (g, w, h) => { g.clearRect(0, 0, w, h); g.fillStyle = '#2f2a26'; for (let k = 0; k <= n; k++) g.fillRect(k / n * w - 3, 0, 6, h); g.fillStyle = '#e6e0d6'; for (let f = 0; f <= MAIN; f++) g.fillRect(0, h - f / MAIN * h - 6, w, 12); });
+  const geo = new THREE.BufferGeometry(), A = new V3(a.x, Y0, a.z), Bv = new V3(b.x, Y0, b.z), Cv = new V3(b.x, Y0 + H, b.z), D = new V3(a.x, Y0 + H, a.z);
+  geo.setAttribute('position', new THREE.Float32BufferAttribute([...A.toArray(), ...Bv.toArray(), ...Cv.toArray(), ...A.toArray(), ...Cv.toArray(), ...D.toArray()], 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1], 2)); geo.computeVertexNormals();
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(geo, new THREE.MeshPhysicalMaterial({ color: 0xeef3f4, roughness: 0.03, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false })));
+  const fr = new THREE.Mesh(geo, mat({ map: t, transparent: true, alphaTest: 0.3, side: THREE.DoubleSide })); fr.castShadow = true; g.add(fr); return g;
 }
 function quad(a, b, c, d, material) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute([...a.toArray(), ...b.toArray(), ...c.toArray(), ...a.toArray(), ...c.toArray(), ...d.toArray()], 3)); g.computeVertexNormals(); const m = new THREE.Mesh(g, material); m.castShadow = m.receiveShadow = true; return m; }
 function ribbonAlong(pts, w, y, material) { // полоса вдоль линии стекла (конвектор в полу)
@@ -207,40 +223,68 @@ function build() {
   const fg = facadeGeo();
   house.add(new THREE.Mesh(fg, new THREE.MeshPhysicalMaterial({ color: 0xeef3f4, roughness: 0.03, metalness: 0, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1 })));
   const fr = new THREE.Mesh(fg, mat({ map: facadeTex, transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, roughness: 0.5 })); fr.castShadow = true; house.add(fr);
+  house.add(glassSide(W(P2s, P2d, 0), W(0, 0, 0))); house.add(glassSide(W(westAt(-APT), -APT, 0), W(P2s, P2d, 0)));
   // перекрытия этажей ниже и выше — видны через наклонное стекло соседних граней
   for (let f = opt.floor - 6; f <= opt.floor + 7; f++) if (f >= 0 && f <= MAIN) house.add(slabAt(f));
   // комната
-  const s0 = M0 + opt.room * MODULE, s1 = s0 + opt.width * MODULE, yF = Y0 + opt.floor * FLOOR_H, yC = yF + FLOOR_H - SLAB, sm = (s0 + s1) / 2;
-  room = { s0, s1, yF, yC, sm };
-  const floorEdge = slice(yF + 0.01, s0, s1, 0.02);
-  house.add(flatPoly([W(s0, -APT, 0), ...floorEdge.map(([s, d]) => W(s, d, 0)), W(s1, -APT, 0)], yF + 0.005, mat({ map: oak, roughness: 0.7 })));
+  // угловая гостиная: от угла дома на opt.width окон вдоль фасада, глубина DEP от основной линии фасада, сзади стена-шкаф
+  const corner = opt.type === 'corner', DEP = corner ? 5.5 : APT;
+  const s0 = corner ? 0 : M0 + opt.room * MODULE, s1 = corner ? M0 + opt.width * MODULE : s0 + opt.width * MODULE, yF = Y0 + opt.floor * FLOOR_H, yC = yF + FLOOR_H - SLAB, sm = (s0 + s1) / 2;
+  room = { s0, s1, yF, yC, sm, corner, DEP };
+  const outline = (y, inset = 0.02) => [...(corner ? [W(westAt(-DEP) + inset, -DEP, 0), W(P2s + inset * 0.7, P2d - inset * 0.7, 0)] : [W(s0, -DEP, 0)]), ...slice(y, s0, s1, inset).map(([s, d]) => W(s, d, 0)), W(s1, -DEP, 0)];
+  const floorPts = outline(yF + 0.01);
+  house.add(flatPoly(floorPts, yF + 0.005, mat({ map: oak, roughness: 0.7 })));
   // потолок: светлое матовое полотно; в глубине комнаты светится, полоса 1,8 м у окна не светится
-  const ceilEdge = slice(yC - 0.01, s0, s1, 0.02);
-  house.add(flatPoly([W(s0, -APT, 0), ...ceilEdge.map(([s, d]) => W(s, d, 0)), W(s1, -APT, 0)], yC - 0.005, CEIL, true));
-  const glowEdge = slice(yC - 0.01, s0 + 0.3, s1 - 0.3, 1.8);
-  house.add(flatPoly([W(s0 + 0.3, -APT + 0.3, 0), ...glowEdge.map(([s, d]) => W(s, d, 0)), W(s1 - 0.3, -APT + 0.3, 0)], yC - 0.012, GLOW, true));
-  for (const k of [0.25, 0.5, 0.75]) { const l = new THREE.PointLight(0xfff4e6, 0, 14, 1.6); l.position.copy(W(s0 + (s1 - s0) * k, -3.5, yC - 0.4)); house.add(l); interiorLights.push(l); }
+  house.add(flatPoly(outline(yC - 0.01), yC - 0.005, CEIL, true));
+  const g0 = corner ? 1.5 : s0 + 0.3, glowEdge = slice(yC - 0.01, g0, s1 - 0.3, 1.8);
+  house.add(flatPoly([W(g0, -DEP + 0.3, 0), ...glowEdge.map(([s, d]) => W(s, d, 0)), W(s1 - 0.3, -DEP + 0.3, 0)], yC - 0.012, GLOW, true));
+  let area = 0; for (let i = 0; i < floorPts.length; i++) { const p = floorPts[i], q = floorPts[(i + 1) % floorPts.length]; area += p.x * q.z - q.x * p.z; } area = Math.abs(area) / 2;
+  for (const k of [0.25, 0.5, 0.75]) { const l = new THREE.PointLight(0xfff4e6, 0, 14, 1.6); l.position.copy(W(s0 + (s1 - s0) * k, -DEP / 2, yC - 0.4)); house.add(l); interiorLights.push(l); }
   // стены квартиры: белые, перегородки до самого стекла
   const wall = mat({ color: 0xf1eee9, side: THREE.DoubleSide });
-  for (const s of [s0, s1]) house.add(quad(W(s, -APT, yF), W(s, offsetAt(s, yF), yF), W(s, offsetAt(s, yC), yC), W(s, -APT, yC), wall));
-  house.add(quad(W(s0, -APT, yF), W(s1, -APT, yF), W(s1, -APT, yC), W(s0, -APT, yC), wall));
-  const door = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.4, 0.06), mat({ color: 0xd8cbb6 })); door.position.copy(W(s0 + 1.2, -APT + 0.04, yF + 1.2)); door.rotation.y = Math.atan2(-dirS.y, dirS.x); house.add(door);
+  for (const s of corner ? [s1] : [s0, s1]) house.add(quad(W(s, -DEP, yF), W(s, offsetAt(s, yF), yF), W(s, offsetAt(s, yC), yC), W(s, -DEP, yC), wall));
+  const sB = corner ? westAt(-DEP) : s0;
+  house.add(quad(W(sB, -DEP, yF), W(s1, -DEP, yF), W(s1, -DEP, yC), W(sB, -DEP, yC), wall));
+  const door = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.4, 0.06), mat({ color: 0xd8cbb6 })); door.position.copy(W(corner ? s1 - 1.3 : s0 + 1.2, -DEP + 0.04, yF + 1.2)); door.rotation.y = Math.atan2(-dirS.y, dirS.x); house.add(door);
   // конвектор в полу вдоль всего стекла
   house.add(ribbonAlong(slice(yF + 0.02, s0 + 0.05, s1 - 0.05, 0.1), 0.3, yF + 0.012, mat({ color: 0x3d3a36, roughness: 0.6 })));
   // мебель и человек для масштаба (локально: x вдоль фасада, z к окну)
   const grp = new THREE.Group(); grp.position.copy(W(sm, 0, yF)); grp.rotation.y = Math.atan2(-dirS.y, dirS.x); house.add(grp);
   const B = (w, h, d, x, y, z, m) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y + h / 2, z); b.castShadow = b.receiveShadow = true; grp.add(b); return b; };
   if (opt.furn) { // мебель ровно та, что описана в промптах; локально: x вдоль фасада (−w/2…w/2), z к окну (0 — основная линия фасада, −7,5 — коридор)
-    const hw = (s1 - s0) / 2, back = -APT;
+    const hw = (s1 - s0) / 2, back = -DEP;
     const M_ = { boucle: mat({ color: 0xe9e2d6, roughness: 1 }), cognac: mat({ color: 0x9a5f3a, roughness: 0.6 }), trav: mat({ color: 0xdcccb0, roughness: 0.8 }), bronze: mat({ color: 0x5b4632, metalness: 0.6, roughness: 0.4 }),
       rug: mat({ color: 0xe3d9c6, roughness: 1 }), oakDark: mat({ color: 0xa98457, roughness: 0.6 }), ash: mat({ color: 0xd9c4a0, roughness: 0.7 }), linen: mat({ color: 0xf3efe7, roughness: 1 }), art: mat({ color: 0xb98a5e }), dark: mat({ color: 0x3b332b }) };
     const C = (r, h, x, y, z, m, sx = 1, sz = 1) => { const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 32), m); c.position.set(x, y + h / 2, z); c.scale.set(sx, 1, sz); c.castShadow = c.receiveShadow = true; grp.add(c); return c; };
     const armchair = (x, z, rot) => { const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = rot; grp.add(g); const add = (w, h, d, xx, yy, zz) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M_.cognac); b.position.set(xx, yy + h / 2, zz); b.castShadow = true; g.add(b); };
       add(0.85, 0.42, 0.85, 0, 0, 0); add(0.85, 0.4, 0.16, 0, 0.42, -0.36); add(0.14, 0.2, 0.85, -0.36, 0.42, 0); add(0.14, 0.2, 0.85, 0.36, 0.42, 0); };
     // шкаф-стена из ясеня вдоль одной перегородки — до половины глубины комнаты
-    if (opt.type !== 'lounge') B(0.6, FLOOR_H - SLAB - 0.02, 4.2, -hw + 0.3, 0, back + 2.1, M_.ash); // в гостиной с камином вместо шкафа стеновая панель
-    if (opt.type !== 'lounge') for (let k = 0; k < 6; k++) B(0.01, FLOOR_H - SLAB - 0.3, 0.004, -hw + 0.605, 0.15, back + 0.35 + k * 0.7, M_.dark); // щели фасадов
-    if (opt.type === 'lounge') { // как на референсах: слева камин и стеновая панель, по центру изогнутый диван и травертиновые столики, справа картина и скульптура
+    if (opt.type !== 'lounge' && !corner) B(0.6, FLOOR_H - SLAB - 0.02, 4.2, -hw + 0.3, 0, back + 2.1, M_.ash); // в гостиной с камином вместо шкафа стеновая панель
+    if (opt.type !== 'lounge' && !corner) for (let k = 0; k < 6; k++) B(0.01, FLOOR_H - SLAB - 0.3, 0.004, -hw + 0.605, 0.15, back + 0.35 + k * 0.7, M_.dark); // щели фасадов
+    if (corner) { // угловая гостиная-столовая: у угла с окнами на две стороны — гостиная с камином, дальше — столовая на 8 мест
+      const cx = -hw + 4.6, stone = mat({ color: 0x2e2a27, roughness: 0.45 });
+      B(2 * hw - 1.4, FLOOR_H - SLAB - 0.02, 0.55, 0.7, 0, back + 0.28, M_.ash);                               // стена-шкаф из ясеня вдоль всей задней стены
+      for (let x = -hw + 1; x < hw - 1; x += 0.75) B(0.012, FLOOR_H - SLAB - 0.3, 0.005, x, 0.15, back + 0.56, M_.dark);
+      B(5.0, 0.42, 0.75, cx, 0, back + 0.95, stone); B(3.6, 0.12, 0.3, cx, 0.42, back + 0.95, mat({ color: 0xffb35c, emissive: 0xff8a2a, emissiveIntensity: 1.2 })); // низкий камин в нише
+      B(5.0, FLOOR_H - SLAB - 0.45, 0.2, cx, 0.43, back + 0.62, mat({ color: 0xd8cdbd, roughness: 0.9 }));    // каменная панель над камином
+      B(5.2, 0.012, 3.8, cx, 0, -2.7, M_.rug);
+      for (let i = 0; i < 9; i++) { const a = -Math.PI / 2 - 1.0 + i * 0.25, r0 = 2.0, cz = -2.4; const b = B(0.9, 0.42, 0.78, cx + Math.cos(a) * r0, 0, cz + Math.sin(a) * r0 * 0.75, M_.boucle); b.rotation.y = -Math.PI / 2 - a; }
+      for (let i = 0; i < 9; i++) { const a = -Math.PI / 2 - 1.0 + i * 0.25, r0 = 2.4, cz = -2.4; const b = B(0.9, 0.36, 0.2, cx + Math.cos(a) * r0, 0.42, cz + Math.sin(a) * r0 * 0.75, M_.boucle); b.rotation.y = -Math.PI / 2 - a; } // изогнутый диван спиной к камину, лицом к окнам
+      C(0.55, 0.36, cx - 0.4, 0, -2.0, M_.trav); C(0.4, 0.3, cx + 0.6, 0, -1.6, M_.trav);                     // два круглых столика из травертина
+      B(0.3, 0.1, 0.22, cx - 0.4, 0.36, -2.0, M_.dark); C(0.08, 0.3, cx - 0.2, 0.36, -1.9, M_.linen);
+      armchair(cx - 2.9, -1.2, 1.2); armchair(cx + 2.4, -0.9, -0.9);                                          // кресла у угловых окон
+      B(0.4, 0.9, 0.4, -hw - 1.0, 0, -2.4, M_.trav); C(0.12, 0.8, -hw - 1.0, 0.9, -2.4, M_.bronze);           // скульптура в углу у стекла
+      const dx = hw - 4.0;                                                                                     // столовая
+      C(1.6, 0.75, dx, 0, -2.6, M_.oakDark, 1, 0.42); C(0.35, 0.72, dx, 0, -2.6, M_.bronze);
+      for (const [x, z, r] of [[-0.9, -0.95, 0], [0, -0.95, 0], [0.9, -0.95, 0], [-0.9, 0.95, Math.PI], [0, 0.95, Math.PI], [0.9, 0.95, Math.PI], [-1.95, 0, Math.PI / 2], [1.95, 0, -Math.PI / 2]]) {
+        const ch = new THREE.Group(); ch.position.set(dx + x, 0, -2.6 + z); ch.rotation.y = r; grp.add(ch);
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.46, 0.5), M_.cognac); seat.position.y = 0.23; seat.castShadow = true; ch.add(seat);
+        const bk = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.08), M_.cognac); bk.position.set(0, 0.68, -0.22); bk.castShadow = true; ch.add(bk);
+      }
+      C(0.1, 0.35, dx, 0.75, -2.6, M_.linen);
+      B(0.04, 1.4, 1.9, hw - 0.03, 1.0, -2.6, M_.art);                                                         // картина на торцевой стене столовой
+      B(2.4, 0.8, 0.45, dx, 0, back + 0.85, M_.oakDark);                                                       // буфет у стены-шкафа
+    } else if (opt.type === 'lounge') { // как на референсах: слева камин и стеновая панель, по центру изогнутый диван и травертиновые столики, справа картина и скульптура
       B(0.9, 0.42, 5.2, -hw + 0.45, 0, back + 3.2, mat({ color: 0x2e2a27, roughness: 0.5 }));            // длинный низкий камин-скамья из тёмного камня
       B(2.2, 0.12, 0.35, -hw + 0.55, 0.42, back + 3.2, mat({ color: 0xffb35c, emissive: 0xff8a2a, emissiveIntensity: 1.2 })).rotation.y = Math.PI / 2; // пламя
       B(0.5, FLOOR_H - SLAB - 0.44, 5.2, -hw + 0.25, 0.42, back + 3.2, mat({ color: 0xd8cdbd, roughness: 0.9 })); // стеновая панель над камином
@@ -286,7 +330,6 @@ function build() {
   scene.add(house);
   // сколько грань выступает и как наклонено стекло в этой комнате
   let dMin = 99, dMax = -99, tilt = 0; for (let s = s0; s <= s1; s += 0.2) { const a = offsetAt(s, yF), b = offsetAt(s, yC); dMin = Math.min(dMin, a, b); dMax = Math.max(dMax, a, b); tilt = Math.max(tilt, Math.abs(Math.atan2(b - a, yC - yF)) / rad); }
-  let area = 0; for (let x = s0; x < s1; x += 0.05) area += 0.05 * (APT + offsetAt(x + 0.025, yF)); // площадь пола комнаты с выступами граней
   document.getElementById('info').textContent = `Площадь комнаты ≈ ${Math.round(area)} м². Этаж ${opt.floor}, комната ${(s1 - s0).toFixed(1).replace('.', ',')} м вдоль фасада, глубина до коридора ${APT.toString().replace('.', ',')} м + выступ грани. Стекло в этой комнате выдвинуто от ${dMin.toFixed(1).replace('.', ',')} до ${dMax.toFixed(1).replace('.', ',')} м от основной линии фасада и наклонено до ${Math.round(tilt)}° от вертикали. Высота от пола до потолка ${(FLOOR_H - SLAB).toFixed(1).replace('.', ',')} м. Потолок светится в глубине, полоса 1,8 м у окна не светится; конвектор в полу вдоль стекла.`;
   document.querySelectorAll('[data-type]').forEach(b => b.classList.toggle('on', b.dataset.type === opt.type));
   document.getElementById('floorLabel').textContent = opt.floor; document.getElementById('roomLabel').textContent = `с ${opt.room + 1}-го окна`; document.getElementById('widthLabel').textContent = `${opt.width} окна (${(opt.width * MODULE).toFixed(1).replace('.', ',')} м)`;
@@ -315,21 +358,23 @@ function applyTime() {
 function setView(name) {
   const { s0, s1, yF, sm } = room; let pos, tgt;
   let sMax = sm, dMax = -1; for (let s = s0 + 0.5; s <= s1 - 0.5; s += 0.2) { const d = offsetAt(s, yF + 1.5); if (d > dMax) { dMax = d; sMax = s; } }
-  if (name === 'back') { pos = W(s0 + 1.1, -APT + 0.6, yF + 1.6); tgt = W(s1 - 1.5, 1.5, yF + 1.3); } // из угла у входа в комнату
+  if (name === 'back') { pos = W(s0 + 1.1, -room.DEP + 0.6, yF + 1.6); tgt = W(s1 - 1.5, 1.5, yF + 1.3); } // из угла у входа в комнату
   if (name === 'window') { pos = W(s0 + 1.0, -1.6, yF + 1.6); tgt = W(s1 - 0.6, offsetAt(s1 - 0.6, yF + 1.4) - 0.3, yF + 1.35); } // вдоль ломаного стекла
   if (name === 'out') { pos = W(sm, -1.5, yF + 1.6); tgt = W(sm, 60, yF - 8); }
-  if (name === 'hero') { pos = W(sm - 0.8, -APT + 0.35, yF + 1.35); tgt = W(sm - 0.8, 3, yF + 1.35); } // из глубины по оси, прямо на стекло
-  if (name === 'corner2') { pos = W(s1 - 0.6, -APT + 0.6, yF + 1.6); tgt = W(s0 + 1.5, 1.5, yF + 1.3); }
-  if (name === 'fromwindow') { pos = W(sm + 1.2, Math.min(offsetAt(sm + 1.2, yF), offsetAt(sm + 1.2, room.yC)) - 0.6, yF + 1.6); tgt = W(sm - 0.8, -APT, yF + 1.1); }
+  if (name === 'along') { pos = W(s1 - 0.9, -room.DEP + 1.2, yF + 1.45); tgt = W(s0 - 2.5, 1.2, yF + 1.35); }      // от торцевой стены вдоль ломаного стекла
+  if (name === 'tocorner') { pos = W(s0 + (s1 - s0) * 0.72, -room.DEP + 2.3, yF + 1.45); tgt = W(P2s - 1, P2d + 1, yF + 1.3); } // в угол с окнами на две стороны
+  if (name === 'hero') { pos = W(sm - 0.8, -room.DEP + 0.35, yF + 1.35); tgt = W(sm - 0.8, 3, yF + 1.35); } // из глубины по оси, прямо на стекло
+  if (name === 'corner2') { pos = W(s1 - 0.6, -room.DEP + 0.6, yF + 1.6); tgt = W(s0 + 1.5, 1.5, yF + 1.3); }
+  if (name === 'fromwindow') { pos = W(sm + 1.2, Math.min(offsetAt(sm + 1.2, yF), offsetAt(sm + 1.2, room.yC)) - 0.6, yF + 1.6); tgt = W(sm - 0.8, -room.DEP, yF + 1.1); }
   if (name === 'seated') { pos = W(sm, opt.type === 'living' ? -4.7 : -APT + 1.6, yF + (opt.type === 'living' ? 1.1 : 1.2)); tgt = W(sm, 6, yF + 1.0); }
   if (name === 'plan') { pos = W(sm, -1, room.yC + 14); tgt = W(sm, -1, yF); }
-  camera.fov = name === 'hero' ? 58 : 62; camera.updateProjectionMatrix(); // по оси — объектив чуть уже, меньше потолка
+  camera.fov = { hero: 58, along: 55, tocorner: 56 }[name] || 62; camera.updateProjectionMatrix(); // по оси — объектив чуть уже, меньше потолка
   lookAt(pos, tgt); document.getElementById('fov').value = camera.fov; document.getElementById('fovLabel').textContent = Math.round(camera.fov) + '°';
   house.children.forEach(c => { if (c.material === CEIL || c.material === GLOW) c.visible = name !== 'plan'; });
   document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === name));
   curView = name;
 }
-let curView = params.get('view') || 'back';
+let curView = params.get('view') || 'along';
 
 // ---- Управление ----
 document.getElementById('hideUi').onclick = () => document.body.classList.add('clean');
