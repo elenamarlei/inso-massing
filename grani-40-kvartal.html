@@ -32,6 +32,7 @@
     <button data-view="corner">Срезанный угол</button>
     <button data-view="crown">Верх</button>
     <button data-view="far">Издалека</button>
+    <button data-view="behind">Город позади</button>
     <button data-view="quarter">Квартал</button>
     <button data-view="top">План сверху</button>
   </div>
@@ -40,7 +41,8 @@
   <label>Высота грани: <span id="chLabel"></span><input type="range" id="ch" min="3" max="10" step="1"></label>
   <label><input type="checkbox" id="ends"> Торцы тоже гранями</label>
   <label><input type="checkbox" id="street"> Подиум по улице, башня повёрнута на нём</label>
-  <label><input type="checkbox" id="nb"> Соседние дома</label>
+  <label><input type="checkbox" id="nb"> Город вокруг</label>
+  <label>Город позади: <select id="city"><option value="low">невысокий, 3–9 эт.</option><option value="high">с высокими домами до 25 эт.</option></select></label>
   <label><input type="checkbox" id="labels"> Этажность</label>
   <label><input type="checkbox" id="evening"> Вечер: подсветка верха, подиум, горящие окна</label>
   <label><input type="checkbox" id="sun"> Солнце (55° с. ш.) <select id="date"></select></label>
@@ -69,9 +71,9 @@ const params = new URLSearchParams(location.search);
 if (params.get('clean')) document.body.classList.add('clean');
 const flag = (k, d) => params.has(k) ? params.get(k) === '1' : d;
 const opt = {
-  fold: +(params.get('fold') ?? 4), cw: +(params.get('cw') ?? 4), ch: +(params.get('ch') ?? 6),
+  fold: +(params.get('fold') ?? 6), cw: +(params.get('cw') ?? 2), ch: +(params.get('ch') ?? 5),
   ends: flag('ends', true), street: flag('street', true), nb: flag('nb', true), labels: flag('labels', false),
-  evening: flag('evening', false), sun: flag('sun', false), date: params.get('date') || 'nov',
+  evening: flag('evening', false), sun: flag('sun', false), date: params.get('date') || 'nov', city: params.get('city') === 'high' ? 'high' : 'low',
 };
 
 // ---- План башни: параллелограмм, торцы по линии север–юг, острые углы срезаны ----
@@ -110,7 +112,8 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(36, innerWidth / innerHeight, 0.5, 5000);
+const camera = new THREE.PerspectiveCamera(36, innerWidth / innerHeight, 0.5, 8000);
+scene.fog = new THREE.Fog(0xdcdfe3, 900, 3400); // дальний город растворяется в дымке, края не видно
 const controls = new OrbitControls(camera, renderer.domElement);
 const hemi = new THREE.HemisphereLight(0xffffff, 0xb8bcc0, 1.1); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
@@ -170,22 +173,7 @@ function topGlowMaps(len, ev) {
   g.beginPath(); g.moveTo(0, col.height / 2); g.lineTo(col.width, col.height / 2); g.stroke();
   return { map: toTex(col), emissiveMap: toTex(emi) };
 }
-// соседние дома: только силуэт и ритм окон, без деталей
-const NPX = 5, NFLOOR = 3.1;
-function blockMaps(len, floors, office, ev) {
-  const col = canvas(len, floors * NFLOOR, NPX), emi = canvas(len, floors * NFLOOR, NPX), g = col.getContext('2d'), e = emi.getContext('2d');
-  const H = col.height, y = m => H - m * NPX;
-  g.fillStyle = office ? '#cfd0cf' : '#d6d0c7'; g.fillRect(0, 0, col.width, H); e.fillStyle = '#000'; e.fillRect(0, 0, emi.width, H);
-  for (let f = 0; f < floors; f++) {
-    const step = office ? 1.6 : 3.2, w = office ? 1.5 : 1.6, h = office ? 2.0 : 1.6, sill = office ? 0.6 : 0.9;
-    for (let x = 1; x + w < len - 0.5; x += step) {
-      const lit = ev && rnd() < (office ? 0.15 : 0.35);
-      g.fillStyle = lit ? '#e9c58f' : (ev ? '#2a313a' : '#8f979d'); g.fillRect(x * NPX, y(f * NFLOOR + sill + h), w * NPX, h * NPX);
-      if (lit) { e.fillStyle = '#6e5130'; e.fillRect(x * NPX, y(f * NFLOOR + sill + h), w * NPX, h * NPX); }
-    }
-  }
-  return { map: toTex(col), emissiveMap: toTex(emi) };
-}
+const NFLOOR = 3.1; // этаж соседних домов
 
 // ---- Геометрия ----
 function wall(p1, p2, y0, y1, out, material) {
@@ -294,7 +282,7 @@ function build() {
     `Грань ≈ ${opt.cw} окна × ${opt.ch} этажей, вынос ${f1(opt.fold)} м. <b>Грани южного фасада смотрят от ${az(A.azMin)} до ${az(A.azMax)} от юга</b> (правило — в пределах ±30°), стекло наклонено до ${Math.round(A.tilt)}°. ` +
     (opt.ends ? `Торцы сложены гранями (вынос ${f1(opt.fold * 0.6)} м), окна в южной части торца. ` : '') +
     (opt.street ? `Подиум ${Math.round(R.x1 - R.x0)} × ${Math.round(R.z1 - R.z0)} м по сетке улиц, башня повёрнута на нём на 20°. ` : 'Подиум повторяет башню. ') +
-    `Двор ${Math.round(Y.x1 - Y.x0)} × ${Math.round(Y.z1 - Y.z0)} м к западу от подиума. С юга: тротуар 10 м с деревьями и кустами, дорога 12 м, парк. С севера: вход, улица, офисы 5–7 эт. в ≈ ${Math.round(Math.min(...PLAN.map(p => p.y)) - S.city)} м, дальше жилые кварталы 7–9 эт.`;
+    `Двор ${Math.round(Y.x1 - Y.x0)} × ${Math.round(Y.z1 - Y.z0)} м к западу от подиума. С юга: тротуар 10 м с деревьями и кустами, дорога 12 м, парк. С севера: вход, улица, офисы 5–7 эт. в ≈ ${Math.round(Math.min(...PLAN.map(p => p.y)) - S.city)} м, дальше город до горизонта: ${opt.city === 'high' ? 'кварталы 3–9 эт. и несколько групп башен 14–25 эт. (до ≈ 78 м)' : 'только невысокие кварталы 3–9 эт.'}`;
   document.getElementById('foldLabel').textContent = `${f1(opt.fold)} м`;
   document.getElementById('cwLabel').textContent = `${opt.cw} окна (${f1(opt.cw * MODULE)} м)`;
   document.getElementById('chLabel').textContent = `${opt.ch} этажей`;
@@ -316,7 +304,7 @@ const trees = [];
 const tree = (x, z, h) => trees.push([x, z, h]);
 let s2 = 7; const rnd2 = () => (s2 = (s2 * 16807) % 2147483647) / 2147483647;
 function buildGround() {
-  const ground = rect(-1500, -1500, 1500, 1500, C.city, 0);
+  const ground = rect(-4000, -4000, 4000, 4000, C.city, 0);
   // юг: тротуар с деревьями и кустами → дорога → тротуар у парка → парк
   rect(-700, R.z1, 700, S.walkS, C.walk, 0.04);
   rect(-700, S.walkS, 700, S.roadS, C.road, 0.03);
@@ -388,49 +376,125 @@ function buildGround() {
   trunks.castShadow = crowns.castShadow = true; crowns.receiveShadow = true; scene.add(trunks, crowns);
 }
 
-// ---- Соседние дома: край парка в городе ----
-// [x0, z0, x1, z1, этажей, тип]: ring — квартал с внутренним двором, bar — корпус, office — офисы и магазины
-const NB = [
-  // север, через улицу: офисы и магазины 5–7 эт.
+// ---- Город вокруг: край парка в городе ----
+// Ближние соседи заданы вручную (расстояния до башни), дальше до горизонта город собирается из кварталов разной формы.
+// low — только невысокие дома 3–9 эт.; high — плюс несколько башен 14–25 эт. (не выше ≈ 78 м, почти вдвое ниже ИНСО)
+const NEAR = [ // [x0, z0, x1, z1, этажей, форма, открытая сторона]
   [-200, S.city - 18, -110, S.city, 5, 'office'], [-95, S.city - 18, -25, S.city, 6, 'office'], [-10, S.city - 18, 60, S.city, 7, 'office'],
   [75, S.city - 18, 150, S.city, 6, 'office'], [165, S.city - 18, 250, S.city, 5, 'office'],
-  // дальше на север: жилые кварталы 7–9 эт.
-  [-230, S.city - 120, -130, S.city - 40, 8, 'ring'], [-110, S.city - 120, -10, S.city - 40, 9, 'ring'], [10, S.city - 120, 110, S.city - 40, 9, 'ring'], [130, S.city - 120, 230, S.city - 40, 8, 'ring'],
-  [-230, S.city - 230, -130, S.city - 140, 7, 'ring'], [-110, S.city - 230, -10, S.city - 140, 8, 'ring'], [10, S.city - 230, 110, S.city - 140, 7, 'ring'], [130, S.city - 230, 230, S.city - 140, 9, 'ring'],
-  // по бокам, у той же улицы вдоль парка: кварталы 5–7 эт. не ближе 60 м от торцов
-  [S.cityE, S.plazaN, S.cityE + 80, R.z1, 6, 'ring'], [S.cityE + 95, S.plazaN, S.cityE + 175, R.z1, 7, 'ring'],
-  [S.cityW - 85, S.plazaN, S.cityW, R.z1, 6, 'ring'], [S.cityW - 180, S.plazaN, S.cityW - 100, R.z1, 7, 'ring'],
+  [S.cityE, S.plazaN, S.cityE + 80, R.z1, 6, 'U', 's'], [S.cityE + 95, S.plazaN, S.cityE + 175, R.z1, 7, 'L', 'w'],
+  [S.cityW - 85, S.plazaN, S.cityW, R.z1, 6, 'ring'], [S.cityW - 180, S.plazaN, S.cityW - 100, R.z1, 7, 'bars'],
 ];
+const NO_CITY = [ // где кварталов нет: участок с ближними соседями, дорога вдоль парка, парк
+  [-300, S.city - 25, 340, S.roadS + 5], [-720, R.z1, 720, S.park], [-720, S.park, 720, 700],
+];
+const TOWER_SPOTS = [[650, -750, 350], [-950, -450, 300], [-250, -1500, 350], [900, 1150, 300]]; // где башни стоят группами
+const FACADES = ['#d6d0c7', '#d9cbb8', '#c9cacb', '#e0dcd4', '#cfd0cf']; // последний — офисы
+const TILE_W = 32, TILE_H = 31; // плитка фасада: 10 окон × 10 этажей
+function facadeMat(i, ev) {
+  const office = i === 4, col = canvas(TILE_W, TILE_H, 8), emi = canvas(TILE_W, TILE_H, 8), g = col.getContext('2d'), e = emi.getContext('2d');
+  const H = col.height, y = m => H - m * 8;
+  let s = 31 + i; const r = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  g.fillStyle = FACADES[i]; g.fillRect(0, 0, col.width, H); e.fillStyle = '#000'; e.fillRect(0, 0, emi.width, H);
+  const step = office ? 1.6 : 3.2, w = office ? 1.5 : 1.6, h = office ? 2.0 : 1.6, sill = office ? 0.6 : 0.9;
+  for (let f = 0; f < 10; f++) for (let x = 0.8; x < TILE_W; x += step) {
+    const lit = ev && r() < (office ? 0.15 : 0.35);
+    g.fillStyle = lit ? '#e9c58f' : (ev ? '#2a313a' : '#8f979d'); g.fillRect(x * 8, y(f * NFLOOR + sill + h), w * 8, h * 8);
+    if (lit) { e.fillStyle = '#6e5130'; e.fillRect(x * 8, y(f * NFLOOR + sill + h), w * 8, h * 8); }
+  }
+  const map = toTex(col), emissiveMap = toTex(emi);
+  for (const t of [map, emissiveMap]) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return mat({ map, emissive: 0xffffff, emissiveMap, emissiveIntensity: ev ? 1 : 0 });
+}
+// все дома города складываются в несколько общих сеток: по одной на фасад, одна на крыши, одна на газоны дворов
+const newCol = () => ({ pos: [], nor: [], uv: [] });
+let cols, roofCol, lawnCol, cityTrees, tops;
+function pushQuad(col, v, n, order) { for (const k of order) { col.pos.push(v[k][0], v[k][1], v[k][2]); col.uv.push(v[k][3], v[k][4]); col.nor.push(...n); } }
+function pushWall(col, p1, p2, y0, y1, out, u0) {
+  const len = p1.distanceTo(p2), dot = -(p2.y - p1.y) * out.x + (p2.x - p1.x) * out.y;
+  pushQuad(col, [[p1.x, y0, p1.y, u0, y0 / TILE_H], [p2.x, y0, p2.y, u0 + len / TILE_W, y0 / TILE_H], [p2.x, y1, p2.y, u0 + len / TILE_W, y1 / TILE_H], [p1.x, y1, p1.y, u0, y1 / TILE_H]],
+    [out.x, 0, out.y], dot > 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2]);
+}
+const pushFlat = (col, x0, z0, x1, z1, y) => pushQuad(col, [[x0, y, z0, 0, 0], [x1, y, z0, 0, 0], [x1, y, z1, 0, 0], [x0, y, z1, 0, 0]], [0, 1, 0], [0, 1, 2, 0, 2, 3]);
+function box(fi, x0, z0, x1, z1, fl, r) {
+  const pl = rectPlan(x0, z0, x1, z1), h = fl * NFLOOR;
+  for (let i = 0; i < 4; i++) { const p = pl[i], q = pl[(i + 1) % 4], d = new V2().subVectors(q, p).normalize(); pushWall(cols[fi], p, q, 0, h, new V2(-d.y, d.x), Math.floor(r() * 10) * 0.1); }
+  pushFlat(roofCol, x0, z0, x1, z1, h);
+  return h;
+}
+// корпус: длинный иногда делится на секции разной высоты
+function bar(fi, x0, z0, x1, z1, fl, r) {
+  const alongX = x1 - x0 >= z1 - z0, L = alongX ? x1 - x0 : z1 - z0;
+  if (L < 50 || r() < 0.4) return box(fi, x0, z0, x1, z1, fl, r);
+  let a = 0;
+  while (a < L) {
+    const b = L - a < 40 ? L : a + 25 + r() * 20, f = Math.max(3, fl + [-1, 0, 0, 1, 2][Math.floor(r() * 5)]);
+    if (alongX) box(fi, x0 + a, z0, x0 + b, z1, f, r); else box(fi, x0, z0 + a, x1, z0 + b, f, r);
+    a = b;
+  }
+}
+function courtyard(x0, z0, x1, z1, r) {
+  pushFlat(lawnCol, x0, z0, x1, z1, 0.03);
+  const n = 1 + Math.floor(r() * 3); for (let i = 0; i < n; i++) cityTrees.push([x0 + 4 + r() * (x1 - x0 - 8), z0 + 4 + r() * (z1 - z0 - 8), 6 + r() * 4]);
+}
+function block(x0, z0, x1, z1, fl, form, open, r, fi) {
+  const D = 13 + Math.floor(r() * 3);
+  const N = () => bar(fi, x0, z0, x1, z0 + D, fl, r), Sb = () => bar(fi, x0, z1 - D, x1, z1, fl, r);
+  const Wb = (a, b) => bar(fi, x0, a, x0 + D, b, fl, r), Eb = (a, b) => bar(fi, x1 - D, a, x1, b, fl, r);
+  switch (form) {
+    case 'office': bar(4, x0, z0, x1, z1, fl, r); break;
+    case 'ring': N(); Sb(); Wb(z0 + D, z1 - D); Eb(z0 + D, z1 - D); courtyard(x0 + D, z0 + D, x1 - D, z1 - D, r); break;
+    case 'U':
+      if (open === 's') { N(); Wb(z0 + D, z1); Eb(z0 + D, z1); } else if (open === 'n') { Sb(); Wb(z0, z1 - D); Eb(z0, z1 - D); }
+      else if (open === 'e') { N(); Sb(); Wb(z0 + D, z1 - D); } else { N(); Sb(); Eb(z0 + D, z1 - D); }
+      courtyard(x0 + D, z0 + D, x1 - D, z1 - D, r); break;
+    case 'L': if (open === 'w') { N(); Eb(z0 + D, z1); } else { N(); Wb(z0 + D, z1); } courtyard(x0 + D, z0 + D, x1 - D, z1 - D, r); break;
+    case 'bars': { const k = 2 + Math.floor(r() * 2), gap = (x1 - x0 - k * D) / (k - 1); for (let i = 0; i < k; i++) bar(fi, x0 + i * (D + gap), z0, x0 + i * (D + gap) + D, z1, fl, r); break; }
+    case 'barsEW': { const k = 2 + Math.floor(r() * 2), gap = (z1 - z0 - k * D) / (k - 1); for (let i = 0; i < k; i++) bar(fi, x0, z0 + i * (D + gap), x1, z0 + i * (D + gap) + D, fl, r); break; }
+    case 'points': { const s = 18 + r() * 4; for (const [u, v] of [[0.08, 0.1], [0.62, 0.1], [0.08, 0.6], [0.62, 0.6]]) box(fi, x0 + u * (x1 - x0), z0 + v * (z1 - z0), x0 + u * (x1 - x0) + s, z0 + v * (z1 - z0) + s, fl + Math.floor(r() * 2), r); courtyard(x0 + 30, z0 + 30, x1 - 30, z1 - 30, r); break; }
+  }
+}
+// башня (только в варианте high): точечная, пластина, двухступенчатая или пара
+function tower(x0, z0, x1, z1, r) {
+  const fl = 14 + Math.floor(r() * 12), kind = Math.floor(r() * 4), cx = (x0 + x1) / 2 + 12, cz = (z0 + z1) / 2 + 10, fi = Math.floor(r() * 5);
+  let h;
+  if (kind === 0) h = box(fi, cx - 11, cz - 11, cx + 11, cz + 11, fl, r);
+  else if (kind === 1) { const ax = r() < 0.5; h = ax ? box(fi, cx - 24, cz - 8, cx + 24, cz + 8, fl - 4, r) : box(fi, cx - 8, cz - 24, cx + 8, cz + 24, fl - 4, r); }
+  else if (kind === 2) { h = box(fi, cx - 11, cz - 11, cx + 11, cz + 11, fl, r); box(fi, cx - 33, cz - 11, cx - 11, cz + 11, fl - 7, r); }
+  else { h = box(fi, cx - 26, cz - 9, cx - 8, cz + 9, fl, r); box(fi, cx + 6, cz - 9, cx + 24, cz + 9, fl - 3, r); }
+  tops.push([cx, h, cz, Math.round(h / NFLOOR)]);
+}
 let city = new THREE.Group(); scene.add(city);
 let labels = new THREE.Group(); scene.add(labels);
-function bar(group, x0, z0, x1, z1, floors, office, ev) {
-  const pl = rectPlan(x0, z0, x1, z1), h = floors * NFLOOR;
-  for (let i = 0; i < 4; i++) {
-    const p = pl[i], q = pl[(i + 1) % 4], d = new V2().subVectors(q, p).normalize(), bm = blockMaps(p.distanceTo(q), floors, office, ev);
-    group.add(wall(p, q, 0, h, new V2(-d.y, d.x), mat({ map: bm.map, emissive: 0xffffff, emissiveMap: bm.emissiveMap, emissiveIntensity: ev ? 1 : 0 })));
-  }
-  group.add(slab(pl, h, 0.4, mat({ color: 0xbdb8b1 })));
-}
 function buildCity() {
-  scene.remove(city, labels); city = new THREE.Group(); labels = new THREE.Group(); seed = 23;
-  const ev = opt.evening;
-  for (const [x0, z0, x1, z1, fl, type] of NB) {
-    const office = type === 'office';
-    if (type === 'ring') {
-      const D = 14;
-      bar(city, x0, z0, x1, z0 + D, fl, false, ev); bar(city, x0, z1 - D, x1, z1, fl, false, ev);
-      bar(city, x0, z0 + D, x0 + D, z1 - D, fl, false, ev); bar(city, x1 - D, z0 + D, x1, z1 - D, fl, false, ev);
-    } else bar(city, x0, z0, x1, z1, fl, office, ev);
-    label(`${fl} эт.`, (x0 + x1) / 2, fl * NFLOOR + 8, (z0 + z1) / 2, labels);
+  scene.remove(city, labels); city = new THREE.Group(); labels = new THREE.Group();
+  const ev = opt.evening, high = opt.city === 'high';
+  cols = FACADES.map(newCol); roofCol = newCol(); lawnCol = newCol(); cityTrees = []; tops = [];
+  let s = 23; const r = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  for (const [x0, z0, x1, z1, fl, form, open] of NEAR) {
+    block(x0, z0, x1, z1, fl, form, open, r, Math.floor(r() * 4));
+    label(`${fl} эт.`, (x0 + x1) / 2, fl * NFLOOR + 10, (z0 + z1) / 2, labels);
   }
-  // за парком: размытая полоса города 9–17 эт., без узнаваемых силуэтов
-  const farMat = mat({ color: ev ? 0x56607a : 0xd3d5d6, transparent: true, opacity: 0.55, depthWrite: false });
-  let s3 = 5; const r3 = () => (s3 = (s3 * 16807) % 2147483647) / 2147483647;
-  for (let x = -1000; x < 1000; x += 30 + r3() * 40) {
-    const w = 20 + r3() * 30, d = 15 + r3() * 25, h = (9 + Math.floor(r3() * 9)) * NFLOOR, z = 690 + r3() * 120;
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), farMat); m.position.set(x, h / 2, z); city.add(m);
+  const BW = 100, BD = 88, ST = 22, FORMS = ['ring', 'ring', 'U', 'U', 'L', 'bars', 'barsEW', 'points'];
+  for (let zz = S.city - 30 + 22 * (BD + ST); zz > -2300; zz -= BD + ST) for (let x0 = -2300; x0 < 2300; x0 += BW + ST) {
+    const x1 = x0 + BW, z1 = zz, z0 = zz - BD;
+    if (NO_CITY.some(([a, b, c, d]) => x0 < c && x1 > a && z0 < d && z1 > b)) continue;
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, dist = Math.hypot(cx, cz), u = r();
+    const spot = TOWER_SPOTS.some(([tx, tz, tr]) => Math.hypot(cx - tx, cz - tz) < tr);
+    if (high && Math.abs(cx) > 160 && dist > 260 && r() < (spot ? 0.4 : 0.04)) { block(x0, z0, x1, z1, 5 + Math.floor(r() * 3), 'L', 'e', r, Math.floor(r() * 4)); tower(x0, z0, x1, z1, r); continue; }
+    if (u < 0.1) { block(x0, z0, x1 - 10, z1 - 20, 4 + Math.floor(r() * 4), 'office', null, r, 4); continue; }
+    const low = u > 0.88, fl = low ? 3 + Math.floor(r() * 2) : 5 + Math.floor(r() * 5);
+    block(x0, z0, x1, z1, Math.min(fl, 9), FORMS[Math.floor(r() * FORMS.length)], 'nsew'[Math.floor(r() * 4)], r, Math.floor(r() * 4));
   }
-  label('40 эт. · 141 м', 0, 152, 0, labels);
+  const geo = c => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(c.pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(c.nor, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(c.uv, 2)); return g; };
+  cols.forEach((c, i) => { if (!c.pos.length) return; const m = new THREE.Mesh(geo(c), facadeMat(i, ev)); m.castShadow = m.receiveShadow = true; city.add(m); });
+  const roofs = new THREE.Mesh(geo(roofCol), mat({ color: 0xbdb8b1, side: THREE.DoubleSide })); roofs.castShadow = roofs.receiveShadow = true; city.add(roofs);
+  const lawns = new THREE.Mesh(geo(lawnCol), mat({ color: C.lawn, roughness: 1 })); lawns.receiveShadow = true; city.add(lawns);
+  const dummy = new THREE.Object3D(), crowns = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), mat({ color: 0xa9aea4, roughness: 1 }), cityTrees.length);
+  cityTrees.forEach(([x, z, h], i) => { dummy.position.set(x, h * 0.6, z); dummy.scale.setScalar(h * 0.35); dummy.updateMatrix(); crowns.setMatrixAt(i, dummy.matrix); });
+  crowns.castShadow = true; city.add(crowns);
+  for (const [x, h, z, fl] of tops) label(`${fl} эт.`, x, h + 10, z, labels);
+  label('ИНСО · 141 м', 0, 152, 0, labels);
   label('двор', (Y.x0 + Y.x1) / 2, 14, (Y.z0 + Y.z1) / 2, labels);
   label('парк', 60, 22, S.park + 120, labels);
   city.visible = opt.nb; labels.visible = opt.labels;
@@ -454,10 +518,10 @@ function applyLight() {
   document.getElementById('tLabel').textContent = `${Math.floor(t)}:${String(Math.round((t % 1) * 60)).padStart(2, '0')}`;
   let dir;
   if (opt.evening) {
-    scene.background = new THREE.Color(0x3c4d68); hemi.color.set(0x8fa3c4); hemi.groundColor.set(0x30343a); hemi.intensity = 0.45;
+    scene.background = new THREE.Color(0x3c4d68); scene.fog.color.set(0x3c4d68); hemi.color.set(0x8fa3c4); hemi.groundColor.set(0x30343a); hemi.intensity = 0.45;
     dir = new THREE.Vector3(-0.7, 0.25, -0.6); sun.intensity = 0.12;
   } else {
-    scene.background = new THREE.Color(0xdcdfe3); hemi.color.set(0xffffff); hemi.groundColor.set(0xb8bcc0);
+    scene.background = new THREE.Color(0xdcdfe3); scene.fog.color.set(0xdcdfe3); hemi.color.set(0xffffff); hemi.groundColor.set(0xb8bcc0);
     if (opt.sun) { const { alt, az } = sunPos(t); dir = new THREE.Vector3(-Math.sin(az) * Math.cos(alt), Math.sin(alt), Math.cos(az) * Math.cos(alt)); sun.intensity = alt > 0 ? 2.4 : 0; hemi.intensity = 0.6; }
     else { dir = new THREE.Vector3(-0.6, 0.55, 0.58); sun.intensity = 1.5; hemi.intensity = 0.95; }
   }
@@ -475,6 +539,7 @@ nbEl.checked = opt.nb; nbEl.onchange = () => { opt.nb = city.visible = nbEl.chec
 lbEl.checked = opt.labels; lbEl.onchange = () => { opt.labels = labels.visible = lbEl.checked; };
 evEl.checked = opt.evening; evEl.onchange = () => { opt.evening = evEl.checked; buildCity(); build(); };
 sunEl.checked = opt.sun; sunEl.onchange = () => { opt.sun = sunEl.checked; applyLight(); };
+const citySel = document.getElementById('city'); citySel.value = opt.city; citySel.onchange = () => { opt.city = citySel.value; buildCity(); };
 dateSel.onchange = () => { opt.date = dateSel.value; setDayBounds(); applyLight(); };
 tSlider.oninput = applyLight;
 
@@ -485,6 +550,7 @@ const views = {
   corner:  { pos: [-170, 40, 170], target: [-15, 70, 5] },
   crown:   { pos: [-80, 160, 120], target: [0, 130, 5] },
   far:     { pos: [-200, 45, 560], target: [0, 70, 0] },
+  behind:  { pos: [-160, 110, 640], target: [0, 40, -500] },
   quarter: { pos: [300, 280, 420], target: [0, 20, -30] },
   top:     { pos: [0, 640, 1], target: [0, 0, -20] },
 };
