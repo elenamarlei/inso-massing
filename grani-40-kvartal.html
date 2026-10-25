@@ -41,7 +41,6 @@
   <label>Вынос граней: <span id="foldLabel"></span><input type="range" id="fold" min="0" max="6" step="0.1"></label>
   <label>Ширина грани: <span id="cwLabel"></span><input type="range" id="cw" min="2" max="6" step="1"></label>
   <label>Высота грани: <span id="chLabel"></span><input type="range" id="ch" min="3" max="10" step="1"></label>
-  <label><input type="checkbox" id="ends"> Торцы тоже гранями</label>
   <label><input type="checkbox" id="street"> Подиум по улице, башня повёрнута на нём</label>
   <label><input type="checkbox" id="nb"> Город вокруг</label>
   <label><input type="checkbox" id="labels"> Этажность</label>
@@ -73,7 +72,7 @@ if (params.get('clean')) document.body.classList.add('clean');
 const flag = (k, d) => params.has(k) ? params.get(k) === '1' : d;
 const opt = {
   fold: +(params.get('fold') ?? 6), cw: +(params.get('cw') ?? 2), ch: +(params.get('ch') ?? 5),
-  ends: flag('ends', true), street: flag('street', true), nb: flag('nb', true), labels: flag('labels', false),
+  street: flag('street', true), nb: flag('nb', true), labels: flag('labels', false),
   evening: flag('evening', false), sun: flag('sun', false), date: params.get('date') || 'nov',
 };
 
@@ -241,16 +240,14 @@ function build() {
   const ceramic = new THREE.MeshPhysicalMaterial({ color: 0xefe9de, roughness: 0.45, clearcoat: 0.3, clearcoatRoughness: 0.4 });
   const y0 = PODIUM_H, yF = y0 + MAIN * FLOOR_H, yTop = yF + TOP_GLOW * FLOOR_H;
   for (const [i, j, out, type] of WALLS) {
-    const a = PLAN[i], b = PLAN[j], len = a.distanceTo(b), isEnd = type === 'eastEnd' || type === 'westEnd';
-    if (type === 'south' || type === 'cut' || (isEnd && opt.ends)) {
+    const a = PLAN[i], b = PLAN[j], len = a.distanceTo(b);
+    if (type === 'south' || type === 'cut') {
       let mods, m0;
       if (type === 'south') { mods = Math.floor((len - 1) / MODULE / 2) * 2 || 2; m0 = (len - mods * MODULE) / 2; }
-      else if (type === 'cut') { mods = 1; m0 = (len - MODULE) / 2; }
-      else { mods = 3; m0 = type === 'eastEnd' ? 0.6 : len - 0.6 - 3 * MODULE; } // на торце окна в южной части, у ядра глухая стена
+      else { mods = 1; m0 = (len - MODULE) / 2; }
       const gm = glassMaps(len, MAIN, m0, mods, ev, type !== 'south');
       const fm = new THREE.MeshPhysicalMaterial({ map: gm.map, roughness: 0.3, metalness: 0.05, clearcoat: 0.3, emissive: 0xffffff, emissiveMap: gm.emissiveMap, emissiveIntensity: ev ? 1 : 0 });
       if (type === 'south') { const m = facets(a, b, y0, yF, out, fm, MAIN, opt.cw * MODULE, opt.ch, opt.fold); southAngles = facetAngles(m); house.add(m); }
-      else if (isEnd) house.add(facets(a, b, y0, yF, out, fm, MAIN, len / 2, opt.ch, opt.fold * 0.6));
       else house.add(wall(a, b, y0, yF, out, fm));
     } else {
       const wins = type === 'north' ? [[1.6, 1.2], [len / 2 - 0.6, 1.2], [len - 2.8, 1.2]]
@@ -284,7 +281,6 @@ function build() {
   document.getElementById('info').innerHTML =
     `38 жилых этажей и подсветка верха на 2-этажном стеклянном подиуме, ≈ ${(PODIUM_H + FLOORS * FLOOR_H).toFixed(0)} м; сверху пояс подсветки верха ≈ 6,6 м (не этажи, внутри ничего нет). ` +
     `Грань ≈ ${opt.cw} окна × ${opt.ch} этажей, вынос ${f1(opt.fold)} м. <b>Грани южного фасада смотрят от ${az(A.azMin)} до ${az(A.azMax)} от юга</b> (правило — в пределах ±30°), стекло наклонено до ${Math.round(A.tilt)}°. ` +
-    (opt.ends ? `Торцы сложены гранями (вынос ${f1(opt.fold * 0.6)} м), окна в южной части торца. ` : '') +
     (opt.street ? `Подиум ${Math.round(R.x1 - R.x0)} × ${Math.round(R.z1 - R.z0)} м по сетке улиц, башня повёрнута на нём на 20°. ` : 'Подиум повторяет башню. ') +
     `Территория ≈ ${((T.x1 - T.x0 - (R.x1 - R.x0)) * (T.z1 - T.z0) / 10000).toFixed(1).replace('.', ',')} га: два крыла по ${Math.round(R.x0 - T.x0)} × ${Math.round(T.z1 - T.z0)} м по бокам от подиума и парадный двор у входа. Дорожки: бульвар 4,5 м от лобби к боковой калитке, прогулочные 2,5–3 м к калиткам и вокруг пруда, беговая петля ${Math.round(TRACK_LEN)} м в каждом крыле. Запад тихий: пруд с фонтаном из арок, настил, беседка, поляна с цветниками, рощи, туманный сад, площадка для малышей. Восток активный: спортплощадка, воркаут с тренажёрами, теннис, лужайка с шезлонгами, семейная и большая детские площадки, яблоневый сад, выгул собак. С юга: тротуар 10 м с деревьями и кустами, дорога 12 м, парк. С севера: вход, улица, офисы 5–7 эт. в ≈ ${Math.round(Math.min(...PLAN.map(p => p.y)) - S.city)} м, дальше город до горизонта: кварталы 3–9 эт. и несколько групп башен 14–25 эт. (до ≈ 78 м).`;
   document.getElementById('foldLabel').textContent = `${f1(opt.fold)} м`;
@@ -783,7 +779,7 @@ const dateSel = document.getElementById('date');
 for (const [k, v] of Object.entries(DATES)) dateSel.add(new Option(v.name, k));
 dateSel.value = opt.date;
 for (const k of ['fold', 'cw', 'ch']) { const el = document.getElementById(k); el.value = opt[k]; el.oninput = () => { opt[k] = +el.value; build(); }; }
-for (const k of ['ends', 'street']) { const el = document.getElementById(k); el.checked = opt[k]; el.onchange = () => { opt[k] = el.checked; build(); }; }
+for (const k of ['street']) { const el = document.getElementById(k); el.checked = opt[k]; el.onchange = () => { opt[k] = el.checked; build(); }; }
 const nbEl = document.getElementById('nb'), lbEl = document.getElementById('labels'), evEl = document.getElementById('evening'), sunEl = document.getElementById('sun');
 nbEl.checked = opt.nb; nbEl.onchange = () => { opt.nb = city.visible = yardGroup.visible = nbEl.checked; };
 lbEl.checked = opt.labels; lbEl.onchange = () => { opt.labels = labels.visible = lbEl.checked; };
